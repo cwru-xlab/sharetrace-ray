@@ -1,5 +1,5 @@
-import queue
-from typing import Iterable, NoReturn, Optional
+from multiprocessing import queues as queue
+from typing import Any, Iterable, NoReturn, Optional
 
 from messaging.base import BaseMailbox
 
@@ -22,7 +22,7 @@ class Mailbox(BaseMailbox):
 
 	def put(
 			self,
-			msgs: Iterable,
+			*msgs: Any,
 			block: bool = True,
 			timeout: Optional[float] = None
 	) -> NoReturn:
@@ -30,10 +30,12 @@ class Mailbox(BaseMailbox):
 			self.mailbox.put(msg, block, timeout)
 
 	def empty(self) -> bool:
-		return self.mailbox.empty()
+		# Queue docs mention to use this over empty()
+		return len(self) == 0
 
 	def full(self) -> bool:
-		return self.mailbox.full()
+		# Queue docs mention to use this over full()
+		return len(self) >= self.max_size
 
 	def __len__(self) -> int:
 		return self.mailbox.qsize()

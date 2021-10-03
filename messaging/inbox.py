@@ -1,5 +1,5 @@
 import collections
-from typing import Iterable, NoReturn, Optional
+from typing import Any, Iterable, NoReturn, Optional
 
 from messaging.base import BaseMailbox
 
@@ -14,7 +14,7 @@ class Inbox(BaseMailbox):
 
 	def put(
 			self,
-			msgs: Iterable,
+			*msgs: Any,
 			block: bool = True,
 			timeout: Optional[float] = None
 	) -> NoReturn:
@@ -27,14 +27,14 @@ class Inbox(BaseMailbox):
 			block: bool = True,
 			timeout: Optional[float] = None
 	) -> Iterable:
-		m = min(len(self.inbox), n)
+		m = min(len(self), n)
 		return tuple(self.inbox.popleft() for _ in range(m))
 
 	def empty(self) -> bool:
-		return len(self.inbox) == 0
+		return len(self) == 0
 
 	def full(self) -> bool:
-		return len(self.inbox) == self.max_size
+		return len(self) == self.max_size
 
 	def __len__(self) -> int:
 		return len(self.inbox)
