@@ -8,22 +8,32 @@ class BasePartition(ABC):
 	"""A subgraph that processes messages involving its nodes.
 
 	Attributes:
-		mailbox: Where new messaging from other partitions arrive.
-		inbox: Where new messaging from nodes within the partition arrive.
-		nodes: The nodes belonging to this partition of the graph.
+		inbox: Where new messages from nodes within the partition arrive.
+			This allows for efficient in-process communication.
+		address: An identifier for the partition that corresponds to its
+			mailbox. This should be included in messages sent to other
+			mailboxes if a response is required.
+		mailboxes: Where new messages from partitions arrive. Each mailbox
+			has a corresponding address to which messages can be sent. This
+			allows a partition to communicate with other partitions by sending
+			messages to their mailbox.
+		nodes: The nodes belonging to this partition of the graph. Each node
+			has an identifier and zero or more attributes.
 	"""
 
-	__slots__ = ("mailbox", "inbox", "nodes")
+	__slots__ = ("inbox", "address", "mailboxes", "nodes")
 
 	def __init__(
 			self,
-			mailbox: BaseMailbox,
 			inbox: BaseMailbox,
+			address: Hashable,
+			mailboxes: Mapping[Hashable, BaseMailbox],
 			nodes: Mapping[Hashable, Any]
 	):
 		super().__init__()
-		self.mailbox = mailbox
 		self.inbox = inbox
+		self.address = address
+		self.mailboxes = mailboxes
 		self.nodes = nodes
 
 	@abstractmethod
@@ -53,7 +63,7 @@ class BaseGraph(ABC):
 
 	@classmethod
 	@abstractmethod
-	def load(cls) -> "BaseGraph":
+	def load(cls, src: str) -> "BaseGraph":
 		pass
 
 	@abstractmethod
