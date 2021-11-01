@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name="ray-graph",
+    name="contact-tracing",
     version="0.1.0",
     packages=[""],
     url="https://github.com/csds438-f21-project/ray-graph",
