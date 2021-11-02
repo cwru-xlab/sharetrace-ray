@@ -1,5 +1,4 @@
 import itertools
-import itertools
 import logging.config
 from typing import Iterable, List, Optional
 
@@ -88,58 +87,6 @@ class NaiveContactSearch(BaseContactSearch):
         if started:
             add_events(event(start, loc1, loc2))
         return events
-
-    # noinspection PyTypeChecker
-    def _find_events(self, h1, h2):
-        locs1, locs2 = h1['locs'], h2['locs']
-        size1, size2 = len(locs1) - 1, len(locs2) - 1
-        if size1 < 1 or size2 < 1 or h1['name'] == h2['name']:
-            return None
-        events = []
-        i1, i2 = 0, 0
-        loc1, loc2 = locs1[i1], locs2[i2]
-        started = False
-        start = self._later(loc1, loc2)
-        while i1 < size1 and i2 < size2:
-            if loc1['loc'] == loc2['loc']:
-                if started:
-                    loc1, i1 = locs1[i1 + 1], i1 + 1
-                    loc2, i2 = locs2[i2 + 1], i2 + 1
-                else:
-                    started = True
-                    start = self._later(loc1, loc2)
-            elif started:
-                started = False
-                events.extend(self._event(start, loc1, loc2))
-            elif loc1['time'] < loc2['time']:
-                loc1, i1 = locs1[i1 + 1], i1 + 1
-            elif loc2['time'] < loc1['time']:
-                loc2, i2 = locs2[i2 + 1], i2 + 1
-            elif _rng.choice((True, False)):
-                loc1, i1 = locs1[i1 + 1], i1 + 1
-            else:
-                loc2, i2 = locs2[i2 + 1], i2 + 1
-        if started:
-            events.extend(self._event(start, loc1, loc2))
-        return events if len(events) > 0 else None
-
-    @staticmethod
-    def _merge(a1, a2):
-        if len(a1) == 0:
-            merged = np.unique(a2)
-        elif len(a2) == 0:
-            merged = np.unique(a1)
-        else:
-            merged = np.unique(np.concatenate((a1, a2)))
-        return merged
-
-    @staticmethod
-    def _advance(arr: np.ndarray, idx: int, n: int = 1):
-        size = arr.size
-        selected = [] if idx > size - 1 else arr[idx: idx + n]
-        advanced = [*selected, *[None] * (n - len(selected))]
-        advanced = advanced if n > 1 else advanced[0]
-        return advanced, idx + n
 
     def _event(self, start, loc1, loc2) -> Iterable[np.ndarray]:
         end = self._earlier(loc1, loc2)
