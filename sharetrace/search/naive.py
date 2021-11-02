@@ -1,7 +1,7 @@
-import functools
+import itertools
 import itertools
 import logging.config
-from typing import Any, Iterator, Optional
+from typing import Iterable, List, Optional
 
 import joblib
 import numpy as np
@@ -10,12 +10,15 @@ from sharetrace import logging_config, model
 from sharetrace.search.base import (
     BaseContactSearch, Contacts, Histories, Pairs, ZERO
 )
+from sharetrace.util.timer import Timer
 from sharetrace.util.types import TimeDelta
 
 _rng = np.random.default_rng()
 
 logging.config.dictConfig(logging_config.config)
 logger = logging.getLogger(__name__)
+
+_EMPTY = ()
 
 
 class NaiveContactSearch(BaseContactSearch):
@@ -29,10 +32,10 @@ class NaiveContactSearch(BaseContactSearch):
         super().__init__(min_dur, n_workers, **kwargs)
 
     def search(self, histories: Histories) -> Contacts:
-        # timed = Timer.time(lambda: self._search(histories))
-        # secs = timed.duration.microseconds / 1e6
-        # logger.info('Contact search: %.3f seconds', secs)
-        return self._search(histories)
+        timed = Timer.time(lambda: self._search(histories))
+        secs = timed.duration.microseconds / 1e6
+        logger.info('Contact search: %.3f seconds', secs)
+        return timed.result
 
     def _search(self, histories: Histories) -> Contacts:
         pairs = self.pairs(histories)
@@ -43,74 +46,105 @@ class NaiveContactSearch(BaseContactSearch):
     def pairs(self, histories: Histories) -> Pairs:
         return itertools.combinations(histories, 2)
 
-    def _find_contact(self, h1, h2):
-        events = self._find_events(h1, 0, h2, 0)
-        if events is None:
-            contact = None
-        else:
-            names = [h1['name'], h2['name']]
-            contact = model.contact(names, events)
+    def _find_contact(self, h1, h2) -> Optional[np.ndarray]:
+        contact = None
+        name1, name2 = h1['name'], h2['name']
+        if name1 != name2:
+            events = self._find(h1['locs'], 0, h2['locs'], 0)
+            if len(events) > 0:
+                names = (name1, name2)
+                contact = model.contact(names, events)
         return contact
 
-    def _find(self, h1, i1, h2, i2):
-        events = []
-        len1, len2 = h1.size - 1, h2.size - 1
-        while i1 < len1 and i2 < len2:
-            pass
-
-    # TODO Refactor to use indices and recursion
     # noinspection PyTypeChecker
-    def _find_events(self, h1, h2):
-        def advance(it: Iterator, n: int = 1, default: Any = None):
-            nxt = functools.partial(lambda it_: next(it_, default))
-            return nxt(it) if n == 1 else tuple(nxt(it) for _ in range(n))
-
-        name1, name2 = h1['name'], h2['name']
-        locs1, locs2 = h1['locs'], h2['locs']
-        if locs1.size < 1 or locs2.size < 1 or name1 == name2:
-            return None
+    def _find(self, locs1, i1, locs2, i2) -> List[np.ndarray]:
         events = []
-        iter1, iter2 = iter(locs1), iter(locs2)
-        (loc1, next1), (loc2, next2) = advance(iter1, 2), advance(iter2, 2)
+        later, event, find, add_events = (
+            self._later, self._event, self._find, events.extend)
+        len1, len2 = len(locs1) - 1, len(locs2) - 1
+        loc1, loc2 = locs1[i1], locs2[i2]
         started = False
-        start = self._later(loc1, loc2)
-        while next1 is not None and next2 is not None:
+        while i1 < len1 and i2 < len2:
             if loc1['loc'] == loc2['loc']:
                 if started:
-                    loc1, next1 = next1, advance(iter1)
-                    loc2, next2 = next2, advance(iter2)
+                    i1, i2 = i1 + 1, i2 + 1
+                    loc1, loc2 = locs1[i1], locs2[i2]
+                else:
+                    started = True
+                    start = later(loc1, loc2)
+            elif started:
+                started = False
+                add_events(event(start, loc1, loc2))
+            elif loc1['time'] < loc2['time']:
+                i1 += 1
+                loc1 = locs1[i1]
+            elif loc2['time'] < loc1['time']:
+                i2 += 1
+                loc2 = locs2[i2]
+            else:
+                add_events(find(locs1, i1 + 1, locs2, i2))
+                add_events(find(locs1, i1, locs2, i2 + 1))
+                break
+        if started:
+            add_events(event(start, loc1, loc2))
+        return events
+
+    # noinspection PyTypeChecker
+    def _find_events(self, h1, h2):
+        locs1, locs2 = h1['locs'], h2['locs']
+        size1, size2 = len(locs1) - 1, len(locs2) - 1
+        if size1 < 1 or size2 < 1 or h1['name'] == h2['name']:
+            return None
+        events = []
+        i1, i2 = 0, 0
+        loc1, loc2 = locs1[i1], locs2[i2]
+        started = False
+        start = self._later(loc1, loc2)
+        while i1 < size1 and i2 < size2:
+            if loc1['loc'] == loc2['loc']:
+                if started:
+                    loc1, i1 = locs1[i1 + 1], i1 + 1
+                    loc2, i2 = locs2[i2 + 1], i2 + 1
                 else:
                     started = True
                     start = self._later(loc1, loc2)
             elif started:
                 started = False
-                event = self._event(start, loc1, loc2)
-                if event is not None:
-                    events.append(event)
+                events.extend(self._event(start, loc1, loc2))
             elif loc1['time'] < loc2['time']:
-                loc1, next1 = next1, advance(iter1)
+                loc1, i1 = locs1[i1 + 1], i1 + 1
             elif loc2['time'] < loc1['time']:
-                loc2, next2 = next2, advance(iter2)
+                loc2, i2 = locs2[i2 + 1], i2 + 1
             elif _rng.choice((True, False)):
-                print(name1, name2, 'incrementing 1 randomly')
-                loc1, next1 = next1, advance(iter1)
+                loc1, i1 = locs1[i1 + 1], i1 + 1
             else:
-                print(name1, name2, 'incrementing 2 randomly')
-                loc2, next2 = next2, advance(iter2)
+                loc2, i2 = locs2[i2 + 1], i2 + 1
         if started:
-            event = self._event(start, loc1, loc2)
-            if event is not None:
-                events.append(event)
+            events.extend(self._event(start, loc1, loc2))
         return events if len(events) > 0 else None
 
-    def _event(self, start, loc1, loc2) -> Optional[np.ndarray]:
+    @staticmethod
+    def _merge(a1, a2):
+        if len(a1) == 0:
+            merged = np.unique(a2)
+        elif len(a2) == 0:
+            merged = np.unique(a1)
+        else:
+            merged = np.unique(np.concatenate((a1, a2)))
+        return merged
+
+    @staticmethod
+    def _advance(arr: np.ndarray, idx: int, n: int = 1):
+        size = arr.size
+        selected = [] if idx > size - 1 else arr[idx: idx + n]
+        advanced = [*selected, *[None] * (n - len(selected))]
+        advanced = advanced if n > 1 else advanced[0]
+        return advanced, idx + n
+
+    def _event(self, start, loc1, loc2) -> Iterable[np.ndarray]:
         end = self._earlier(loc1, loc2)
         dur = end - start
-        if dur >= self.min_dur:
-            event = model.event(start, dur)
-        else:
-            event = None
-        return event
+        return [model.event(start, dur)] if dur >= self.min_dur else _EMPTY
 
     @staticmethod
     def _later(loc1, loc2):

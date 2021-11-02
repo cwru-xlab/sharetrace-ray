@@ -5,8 +5,7 @@ import numpy as np
 from scipy import stats
 
 from sharetrace import model
-from sharetrace.search import kdtree, naive, timed
-from sharetrace.util.timer import Timer
+from sharetrace.search import kdtree, naive
 
 NOW = np.datetime64(datetime.datetime.utcnow(), 's')
 rng = np.random.default_rng()
@@ -72,25 +71,15 @@ def random_score(
 
 def main():
     min_dur = np.timedelta64(15, 'm')
-    n_workers = 1
+    n_workers = -1
     n_search = naive.NaiveContactSearch(min_dur=min_dur, n_workers=n_workers)
     k_search = kdtree.KdTreeContactSearch(
-        min_dur=min_dur, n_workers=n_workers, eps=0, r=0.5)
-
-    searches = (naive.NaiveContactSearch, kdtree.KdTreeContactSearch)
+        min_dur=min_dur, n_workers=n_workers, eps=0, r=0.01)
     histories = random_history(
-        5, lat_range=(0, 0.01), long_range=(0, 0.01), precision=6)
-    print('NAIVE')
+        100, lat_range=(0, 1), long_range=(0, 1), precision=5)
     n_contacts = n_search.search(histories)
-    print('KD TREE')
     k_contacts = k_search.search(histories)
-    n_size, k_size = n_contacts.size, k_contacts.size
-    if n_size != k_size:
-        print(f'SIZE DISCREPANCY: naive {n_size} kd-tree {k_size}')
-        print('NAIVE')
-        print(n_contacts)
-        print('KD TREE')
-        print(k_contacts)
+    print(f'SIZE: naive {n_contacts.size} kd-tree {k_contacts.size}')
 
 
 if __name__ == '__main__':

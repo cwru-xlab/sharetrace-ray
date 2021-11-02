@@ -1,9 +1,9 @@
-from typing import Iterable, List, Tuple, Union, overload
+from typing import List, Tuple, Union, overload
 
 import numpy as np
+import pygeohash
 
 from sharetrace.util.types import DateTime, TimeDelta
-import pygeohash
 
 Coordinate = Tuple[float, float]
 Location = Union[str, Coordinate]
@@ -78,7 +78,7 @@ def event(time: DateTime, dur: TimeDelta) -> np.ndarray:
 
 
 def contact(names: ArrayLike, events: ArrayLike) -> np.ndarray:
-    """Creates a labeled set of events.
+    """Creates a named set of events.
 
     Args:
         names: An iterable, typically of length 2.
@@ -98,11 +98,11 @@ def contact(names: ArrayLike, events: ArrayLike) -> np.ndarray:
 
 
 def history(locs: ArrayLike, name: int) -> np.ndarray:
-    """Creates a named location hist.
+    """Creates a named and sorted location history.
 
     Args:
         locs: An iterable of location numpy structured arrays.
-        name: A 32-bit int that labels the hist.
+        name: A 32-bit int that labels the history.
 
     Returns:
         A structured array with attributes 'name' and 'locs'.

@@ -3,11 +3,11 @@ import sys
 
 config = {
     'version': 1,
-    'root': {
-        'level': logging.DEBUG,
-        'handlers': ['console']
-    },
     'loggers': {
+        'root': {
+            'level': logging.DEBUG,
+            'handlers': ['console']
+        },
         'console': {
             'level': logging.DEBUG,
             'handlers': ['console'],
