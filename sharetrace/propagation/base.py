@@ -5,6 +5,7 @@ from typing import Any, Mapping
 import numpy as np
 
 from sharetrace import model
+from sharetrace.util.types import TimeDelta
 
 TWO_DAYS = np.timedelta64(172_800, 's')
 FIVE_MINUTES = np.timedelta64(5, 'm')
@@ -43,7 +44,7 @@ def _contact_callback(
     return np.array([msg])
 
 
-class RiskPropagation(abc.ABC):
+class RiskPropagation:
     __slots__ = (
         'send_threshold',
         'time_buffer',
@@ -56,13 +57,13 @@ class RiskPropagation(abc.ABC):
 
     def __init__(
             self,
-            send_threshold: Real = 0.75,
-            time_buffer: np.timedelta64 = TWO_DAYS,
-            time_constant: Real = 1,
-            transmission_rate: Real = 0.8,
-            max_duration: np.timedelta64 = FIVE_MINUTES,
-            timeout: Real = np.inf,
-            n_msgs_early_stop: Real = np.inf,
+            send_threshold: float = 0.75,
+            time_buffer: TimeDelta = TWO_DAYS,
+            time_constant: float = 1,
+            transmission_rate: float = 0.8,
+            max_duration: TimeDelta = FIVE_MINUTES,
+            timeout: float = np.inf,
+            n_msgs_early_stop: float = np.inf,
             n_workers: int = 1):
         self.send_threshold = send_threshold
         self.time_buffer = time_buffer

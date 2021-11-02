@@ -1,76 +1,84 @@
 import itertools
-import logging
-from typing import Iterable, NoReturn, Sequence, Tuple
+import logging.config
+from typing import Iterable, NoReturn, Sequence
 
+import joblib
 import numpy as np
 from scipy import spatial
 
+from sharetrace import logging_config, model
+from sharetrace.search.base import Histories, Pairs, ZERO
 from sharetrace.search.naive import NaiveContactSearch
-from sharetrace.util import logging as log
 from sharetrace.util.types import TimeDelta
 
-logger = log.get_stdout_logger(__name__, logging.INFO)
+logging.config.dictConfig(logging_config.config)
+logger = logging.getLogger(__name__)
+
+Locations = Sequence[np.ndarray]
 
 
 class KdTreeContactSearch(NaiveContactSearch):
-    __slots__ = ('r', 'p', 'eps', '_naive',)
+    __slots__ = ('r', 'p', 'eps')
 
     def __init__(
             self,
-            min_duration: TimeDelta,
-            r: float,
+            min_dur: TimeDelta = ZERO,
+            r: float = 1,
             p: float = 2,
             eps: float = 0,
-            n_workers: int = 1):
-        super().__init__(min_duration, n_workers)
+            n_workers: int = 1,
+            **kwargs):
+        super().__init__(min_dur, n_workers, **kwargs)
         self.r = r
         self.p = p
         self.eps = eps
 
-    def pairs(self, histories: Sequence[np.ndarray]) -> Iterable:
-        names, locations = self._extract(histories)
-        kd_tree = spatial.KDTree(self._flatten_ragged(locations))
-        pairs = kd_tree.query_pairs(self.r, self.p, self.eps, 'ndarray')
-        idx = self._map(locations)
-        return self._filter(pairs, histories, idx)
+    def pairs(self, histories: Histories) -> Pairs:
+        locs = self._to_coordinates(histories)
+        idx = self._to_index(locs)
+        pairs = self._query_pairs(locs)
+        return self._filter(pairs, idx, histories)
+
+    def _to_coordinates(self, hists: Histories) -> Histories:
+        logger.debug('Converting to coordinate pairs')
+        par = joblib.Parallel(self.n_workers)
+        return par(joblib.delayed(self._map_history)(h) for h in hists)
 
     @staticmethod
-    def _extract(
-            histories: Sequence[np.ndarray]
-    ) -> Tuple[np.ndarray, Sequence[np.ndarray]]:
-        names = np.array([h['name'] for h in histories])
-        locations = [np.column_stack((h['lat'], h['long'])) for h in histories]
-        return names, locations
-
-    @staticmethod
-    def _map(locations: Sequence[np.ndarray]) -> np.ndarray:
+    def _to_index(locations: Locations) -> np.ndarray:
+        logger.debug('Generating mapping index')
         idx = np.arange(len(locations))
         repeats = [len(locs) for locs in locations]
         return np.repeat(idx, repeats)
 
+    def _query_pairs(self, locations: Locations) -> np.ndarray:
+        logger.debug('Querying the k-d tree for pairs')
+        kd_tree = spatial.KDTree(self._flatten_ragged(locations))
+        return kd_tree.query_pairs(self.r, self.p, self.eps, 'ndarray')
+
     @staticmethod
-    def _filter(
-            pairs: np.ndarray,
-            histories: Sequence[np.ndarray],
-            idx: np.ndarray
-    ) -> Iterable[Tuple[np.ndarray, np.ndarray]]:
-        KdTreeContactSearch._log_percent_diff(len(histories), len(pairs))
-        return ((histories[h1], histories[h2]) for (h1, h2) in idx[pairs])
+    def _filter(pairs: np.ndarray, idx: np.ndarray, hists: Histories) -> Pairs:
+        logger.debug('Filtering queried pairs')
+        unique = np.unique(idx[pairs], axis=0)
+        KdTreeContactSearch._log_percent_diff(len(hists), len(unique))
+        return ((hists[h1], hists[h2]) for (h1, h2) in unique if h1 != h2)
+
+    @staticmethod
+    def _map_history(hist: np.ndarray) -> np.ndarray:
+        return np.vstack([model.to_coord(loc)['loc'] for loc in hist['locs']])
 
     @staticmethod
     def _flatten_ragged(ragged: Iterable[np.ndarray]) -> np.ndarray:
         return np.array([*itertools.chain.from_iterable(ragged)])
 
     @staticmethod
-    def _log_percent_diff(n_histories: int, n_pairs: int) -> NoReturn:
-        n_combos = KdTreeContactSearch._n_combos(n_histories)
-        percent_diff = KdTreeContactSearch._percent_diff(n_combos, n_pairs)
-        logger.info('Percent fewer pairs than naive: %.2f', percent_diff)
+    def _log_percent_diff(n_hists: int, n_pairs: int) -> NoReturn:
+        n_combos = n_hists ** 2
+        diff = n_combos - n_pairs
+        percent = KdTreeContactSearch._percent_diff(n_combos, n_pairs)
+        logger.info(
+            'Number fewer pairs than naive: %d (%.2f percent)', diff, percent)
 
     @staticmethod
-    def _n_combos(n: int) -> int:
-        return int(n * (n - 1) / 2)
-
-    @staticmethod
-    def _percent_diff(x, y, precision: int = 2) -> float:
-        return 0 if x == 0 else round(100 * (x - y) / x, precision)
+    def _percent_diff(x, y) -> float:
+        return 0 if x == 0 else round(100 * (x - y) / x, 2)

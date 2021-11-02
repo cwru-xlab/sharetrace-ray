@@ -1,132 +1,133 @@
-from typing import Iterable, Tuple, overload
+from typing import Iterable, List, Tuple, Union, overload
 
 import numpy as np
 
 from sharetrace.util.types import DateTime, TimeDelta
+import pygeohash
 
 Coordinate = Tuple[float, float]
+Location = Union[str, Coordinate]
+ArrayLike = Union[np.ndarray, List, Tuple]
 
 
-def score(value: float, timestamp: DateTime) -> np.ndarray:
-    """Creates a timestamped probability of a certain event.
+def score(val: float, time: DateTime) -> np.ndarray:
+    """Creates a timestamped probability.
 
     Args:
-        value: A 32-bit float between 0 and 1, inclusive.
-        timestamp: A datetime datetime or numpy datetime64.
+        val: A 32-bit float between 0 and 1, inclusive.
+        time: A datetime datetime or numpy datetime64.
 
     Returns:
-        A structured array with attributes 'value' and 'timestamp'.
+        A structured array with attributes 'val' and 'time'.
     """
-    timestamp = np.datetime64(timestamp)
-    dt = [('value', np.float32), ('timestamp', timestamp.dtype)]
-    return np.array([(value, timestamp)], dtype=dt)[0]
+    time = np.datetime64(time)
+    dt = [('val', np.float32), ('time', time.dtype)]
+    return np.array([(val, time)], dtype=dt)[0]
 
 
 @overload
-def location(coordinate: Coordinate, timestamp: DateTime) -> np.ndarray:
-    """Creates a temporal coordinate-based location.
+def temporal_loc(loc: Coordinate, time: DateTime) -> np.ndarray: ...
+
+
+@overload
+def temporal_loc(loc: str, time: DateTime) -> np.ndarray: ...
+
+
+def temporal_loc(loc: Location, time: DateTime) -> np.ndarray:
+    """Creates a temporal location.
+
+        Args:
+            loc: A string geohash or a (latitude, longitude) tuple.
+            time: A datetime datetime or numpy datetime64.
+
+        Returns:
+            A structured array with attributes 'time' and 'loc'.
+        """
+    time = np.datetime64(time)
+    if isinstance(loc, str):
+        dt = [('loc', f'<U{len(loc)}'), ('time', time.dtype)]
+    else:
+        dt = [('loc', np.float32, (2,)), ('time', time.dtype)]
+    return np.array([(loc, time)], dtype=dt)[0]
+
+
+def to_geohash(coord: np.ndarray, prec: int = 12) -> np.ndarray:
+    lat, long = coord['loc']
+    geohash = pygeohash.encode(lat, long, prec)
+    return temporal_loc(geohash, coord['time'])
+
+
+def to_coord(geohash: np.ndarray) -> np.ndarray:
+    lat, long = pygeohash.decode(geohash['loc'])
+    return temporal_loc((lat, long), geohash['time'])
+
+
+def occurrence(time: DateTime, dur: TimeDelta) -> np.ndarray:
+    """Creates a timestamped secs, where the timestamp indicates the start.
 
     Args:
-        coordinate: A (latitude, longitude) tuple.
-        timestamp: A datetime datetime or numpy datetime64.
+        time: A datetime datetime or numpy datetime64.
+        dur: A datetime timedelta or numpy timedelta64
 
     Returns:
-        A structured array with attributes 'lat', 'long', and 'timestamp'.
+        A structured array with attributes 'time' and 'secs'.
     """
-    """Returns a temporal location of a given time and location."""
-    lat, long = coordinate
-    timestamp = np.datetime64(timestamp)
-    dt = [
-        ('lat', np.float32),
-        ('long', np.float32),
-        ('timestamp', timestamp.dtype)]
-    return np.array([(lat, long, timestamp)], dtype=dt)[0]
+    time, dur = np.datetime64(time), np.timedelta64(dur)
+    dt = [('time', time.dtype), ('secs', dur.dtype)]
+    return np.array([(time, dur)], dtype=dt)[0]
 
 
-def location(geohash: str, timestamp: DateTime) -> np.ndarray:
-    """Creates a temporal geohash-based location.
-
-    Args:
-        geohash: A string geohash. Precision is based on its length.
-        timestamp: A datetime datetime or numpy datetime64.
-
-    Returns:
-        A structured array with attributes 'geohash' and 'timestamp'.
-    """
-    timestamp = np.datetime64(timestamp)
-    dt = [('geohash', f'<U{len(geohash)}'), ('timestamp', timestamp.dtype)]
-    return np.array([(geohash, timestamp)], dtype=dt)[0]
-
-
-def occurrence(timestamp: DateTime, duration: TimeDelta) -> np.ndarray:
-    """Creates a timestamped duration, where the timestamp indicates the start.
-
-    Args:
-        timestamp: A datetime datetime or numpy datetime64.
-        duration: A datetime timedelta or numpy timedelta64
-
-    Returns:
-        A structured array with attributes 'timestamp' and 'duration'.
-    """
-    timestamp, duration = np.datetime64(timestamp), np.timedelta64(duration)
-    dt = [('timestamp', timestamp.dtype), ('duration', duration.dtype)]
-    return np.array([(timestamp, duration)], dtype=dt)[0]
-
-
-def contact(names: Iterable, occurrences: Iterable) -> np.ndarray:
+def contact(names: ArrayLike, occurrences: ArrayLike) -> np.ndarray:
     """Creates a labeled set of occurrences.
 
     Args:
-        names: An iterable of ints, typically of length 2.
+        names: An iterable, typically of length 2.
         occurrences: An iterable of occurrence numpy structured arrays.
 
     Returns:
-        A structured array with attributes 'names', 'timestamp', and 'duration'.
+        A structured array with attributes 'names', 'time', and 'secs'.
     """
     names, occurrences = np.array(names), np.array(occurrences)
     most_recent = np.sort(
-        occurrences, order=('timestamp', 'duration'), kind='stable')[-1]
-    timestamp, duration = most_recent['timestamp'], most_recent['duration']
+        occurrences, order=('time', 'secs'), kind='stable')[-1]
+    timestamp, duration = most_recent['time'], most_recent['secs']
     dt = [
         ('names', names.dtype, names.shape),
-        ('timestamp', timestamp.dtype),
-        ('duration', duration.dtype)]
+        ('time', timestamp.dtype),
+        ('secs', duration.dtype)]
     return np.array([(names, timestamp, duration)], dtype=dt)[0]
 
 
-def history(locations: Iterable, name: int) -> np.ndarray:
-    """Creates a labeled location history.
+def history(locs: ArrayLike, name: int) -> np.ndarray:
+    """Creates a named location hist.
 
     Args:
-        locations: An iterable of location numpy structured arrays.
-        name: A 32-bit int that labels the history.
+        locs: An iterable of location numpy structured arrays.
+        name: A 32-bit int that labels the hist.
 
     Returns:
-        A structured array with attributes 'name' and 'locations'.
+        A structured array with attributes 'name' and 'locs'.
     """
-    """Returns a sorted location history with a name."""
-    locations = np.sort(
-        locations, order=('timestamp', 'location'), kind='stable')
-    dt = [('locations', locations.dtype, locations.shape), ('name', np.int32)]
-    return np.array([(locations, name)], dtype=dt)[0]
+    locs = np.sort(locs, order=('time', 'loc'), kind='stable')
+    dt = [('locs', locs.dtype, locs.shape), ('name', np.int32)]
+    return np.array([(locs, name)], dtype=dt)[0]
 
 
-def message(value: np.ndarray, src: int, dest: int, kind: int) -> np.ndarray:
+def message(val: np.ndarray, src: int, dest: int, kind: int) -> np.ndarray:
     """Creates a message used for passing information between objects.
 
     Args:
-        value: A numpy structured array.
+        val: A numpy structured array.
         src: A 32-bit int that represents the source of the message.
         dest: A 32-bit int that represents the destination of the message.
         kind: An 8-bit int that represents the type of message.
 
     Returns:
-       A structured array with attributes 'value', 'src', 'dest', and 'kind'.
+       A structured array with attributes 'val', 'src', 'dest', and 'kind'.
     """
-    """Returns a message of a given source, destination, kind, and value."""
     dt = [
-        ('value', value.dtype, value.shape),
+        ('val', val.dtype, val.shape),
         ('src', np.int32),
         ('dest', np.int32),
         ('kind', np.int8)]
-    return np.array([(value, src, dest, kind)], dtype=dt)[0]
+    return np.array([(val, src, dest, kind)], dtype=dt)[0]
