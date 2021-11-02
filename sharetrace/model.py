@@ -62,40 +62,39 @@ def to_coord(geohash: np.ndarray) -> np.ndarray:
     return temporal_loc((lat, long), geohash['time'])
 
 
-def occurrence(time: DateTime, dur: TimeDelta) -> np.ndarray:
-    """Creates a timestamped secs, where the timestamp indicates the start.
+def event(time: DateTime, dur: TimeDelta) -> np.ndarray:
+    """Creates a timestamped duration, where the timestamp indicates the start.
 
     Args:
         time: A datetime datetime or numpy datetime64.
         dur: A datetime timedelta or numpy timedelta64
 
     Returns:
-        A structured array with attributes 'time' and 'secs'.
+        A structured array with attributes 'time' and 'dur'.
     """
     time, dur = np.datetime64(time), np.timedelta64(dur)
-    dt = [('time', time.dtype), ('secs', dur.dtype)]
+    dt = [('time', time.dtype), ('dur', dur.dtype)]
     return np.array([(time, dur)], dtype=dt)[0]
 
 
-def contact(names: ArrayLike, occurrences: ArrayLike) -> np.ndarray:
-    """Creates a labeled set of occurrences.
+def contact(names: ArrayLike, events: ArrayLike) -> np.ndarray:
+    """Creates a labeled set of events.
 
     Args:
         names: An iterable, typically of length 2.
-        occurrences: An iterable of occurrence numpy structured arrays.
+        events: An iterable of event numpy structured arrays.
 
     Returns:
-        A structured array with attributes 'names', 'time', and 'secs'.
+        A structured array with attributes 'names', 'time', and 'dur'.
     """
-    names, occurrences = np.array(names), np.array(occurrences)
-    most_recent = np.sort(
-        occurrences, order=('time', 'secs'), kind='stable')[-1]
-    timestamp, duration = most_recent['time'], most_recent['secs']
+    names, events = np.array(names), np.array(events)
+    most_recent = np.sort(events, order=('time', 'dur'), kind='stable')[-1]
+    time, dur = most_recent['time'], most_recent['dur']
     dt = [
         ('names', names.dtype, names.shape),
-        ('time', timestamp.dtype),
-        ('secs', duration.dtype)]
-    return np.array([(names, timestamp, duration)], dtype=dt)[0]
+        ('time', time.dtype),
+        ('dur', dur.dtype)]
+    return np.array([(names, time, dur)], dtype=dt)[0]
 
 
 def history(locs: ArrayLike, name: int) -> np.ndarray:

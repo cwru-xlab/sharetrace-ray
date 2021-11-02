@@ -84,7 +84,8 @@ def main():
     n_contacts = n_search.search(histories)
     print('KD TREE')
     k_contacts = k_search.search(histories)
-    if (n_size := n_contacts.size) != (k_size := k_contacts.size):
+    n_size, k_size = n_contacts.size, k_contacts.size
+    if n_size != k_size:
         print(f'SIZE DISCREPANCY: naive {n_size} kd-tree {k_size}')
         print('NAIVE')
         print(n_contacts)

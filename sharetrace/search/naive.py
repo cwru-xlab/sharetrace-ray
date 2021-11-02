@@ -36,24 +36,31 @@ class NaiveContactSearch(BaseContactSearch):
 
     def _search(self, histories: Histories) -> Contacts:
         pairs = self.pairs(histories)
-        # par = joblib.Parallel(n_jobs=self.n_workers)
-        # contacts = par(joblib.delayed(self._find_contact)(*p) for p in pairs)
-        contacts = [self._find_contact(*p) for p in pairs]
+        par = joblib.Parallel(n_jobs=self.n_workers)
+        contacts = par(joblib.delayed(self._find_contact)(*p) for p in pairs)
         return np.array([c for c in contacts if c is not None])
 
     def pairs(self, histories: Histories) -> Pairs:
         return itertools.combinations(histories, 2)
 
     def _find_contact(self, h1, h2):
-        if (occurrences := self._find_occurrences(h1, h2)) is None:
+        events = self._find_events(h1, 0, h2, 0)
+        if events is None:
             contact = None
         else:
             names = [h1['name'], h2['name']]
-            contact = model.contact(names, occurrences)
+            contact = model.contact(names, events)
         return contact
 
+    def _find(self, h1, i1, h2, i2):
+        events = []
+        len1, len2 = h1.size - 1, h2.size - 1
+        while i1 < len1 and i2 < len2:
+            pass
+
+    # TODO Refactor to use indices and recursion
     # noinspection PyTypeChecker
-    def _find_occurrences(self, h1, h2):
+    def _find_events(self, h1, h2):
         def advance(it: Iterator, n: int = 1, default: Any = None):
             nxt = functools.partial(lambda it_: next(it_, default))
             return nxt(it) if n == 1 else tuple(nxt(it) for _ in range(n))
@@ -62,7 +69,7 @@ class NaiveContactSearch(BaseContactSearch):
         locs1, locs2 = h1['locs'], h2['locs']
         if locs1.size < 1 or locs2.size < 1 or name1 == name2:
             return None
-        occurrences = []
+        events = []
         iter1, iter2 = iter(locs1), iter(locs2)
         (loc1, next1), (loc2, next2) = advance(iter1, 2), advance(iter2, 2)
         started = False
@@ -77,8 +84,9 @@ class NaiveContactSearch(BaseContactSearch):
                     start = self._later(loc1, loc2)
             elif started:
                 started = False
-                if (occ := self._occurrence(start, loc1, loc2)) is not None:
-                    occurrences.append(occ)
+                event = self._event(start, loc1, loc2)
+                if event is not None:
+                    events.append(event)
             elif loc1['time'] < loc2['time']:
                 loc1, next1 = next1, advance(iter1)
             elif loc2['time'] < loc1['time']:
@@ -90,17 +98,19 @@ class NaiveContactSearch(BaseContactSearch):
                 print(name1, name2, 'incrementing 2 randomly')
                 loc2, next2 = next2, advance(iter2)
         if started:
-            if (occ := self._occurrence(start, loc1, loc2)) is not None:
-                occurrences.append(occ)
-        return occurrences if len(occurrences) > 0 else None
+            event = self._event(start, loc1, loc2)
+            if event is not None:
+                events.append(event)
+        return events if len(events) > 0 else None
 
-    def _occurrence(self, start, loc1, loc2) -> Optional[np.ndarray]:
+    def _event(self, start, loc1, loc2) -> Optional[np.ndarray]:
         end = self._earlier(loc1, loc2)
-        if (duration := end - start) >= self.min_dur:
-            occurrence = model.occurrence(start, duration)
+        dur = end - start
+        if dur >= self.min_dur:
+            event = model.event(start, dur)
         else:
-            occurrence = None
-        return occurrence
+            event = None
+        return event
 
     @staticmethod
     def _later(loc1, loc2):
