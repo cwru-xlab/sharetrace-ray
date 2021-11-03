@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import datetime
+import timeit
 from typing import Any, Callable
 
 
 class Timer:
-    __slots__ = ('result', 'duration')
+    __slots__ = ('result', 'seconds')
 
-    def __init__(self, result: Any, duration: datetime.timedelta):
+    def __init__(self, result: Any, seconds: float):
         self.result = result
-        self.duration = duration
+        self.seconds = seconds
 
     @classmethod
     def time(cls, func: Callable) -> Timer:
-        start = datetime.datetime.now()
+        start = timeit.default_timer()
         result = func()
-        stop = datetime.datetime.now()
+        stop = timeit.default_timer()
         return Timer(result, stop - start)

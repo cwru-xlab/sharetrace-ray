@@ -5,11 +5,11 @@ config = {
     'version': 1,
     'loggers': {
         'root': {
-            'level': logging.DEBUG,
+            'level': logging.INFO,
             'handlers': ['console']
         },
         'console': {
-            'level': logging.DEBUG,
+            'level': logging.INFO,
             'handlers': ['console'],
             'propagate': False
         }
@@ -24,7 +24,7 @@ config = {
     },
     'formatters': {
         'default': {
-            'format': '%(asctime)s %(levelname)s %(name)s | %(message)s'
+            'format': '%(asctime)s %(levelname)s %(module)s | %(message)s'
         }
     }
 }

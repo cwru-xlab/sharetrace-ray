@@ -1,11 +1,10 @@
 import itertools
-import logging.config
 from typing import Iterable, List, Optional
 
 import joblib
 import numpy as np
 
-from sharetrace import logging_config, model
+from sharetrace import model
 from sharetrace.search.base import (
     BaseContactSearch, Contacts, Histories, Pairs, ZERO
 )
@@ -13,28 +12,20 @@ from sharetrace.util.timer import Timer
 from sharetrace.util.types import TimeDelta
 
 _rng = np.random.default_rng()
-
-logging.config.dictConfig(logging_config.config)
-logger = logging.getLogger(__name__)
-
 _EMPTY = ()
 
 
-class NaiveContactSearch(BaseContactSearch):
+class BruteContactSearch(BaseContactSearch):
     __slots__ = ()
 
-    def __init__(
-            self,
-            min_dur: TimeDelta = ZERO,
-            n_workers: int = 1,
-            **kwargs):
+    def __init__(self, min_dur: TimeDelta = ZERO, n_workers: int = 1, **kwargs):
         super().__init__(min_dur, n_workers, **kwargs)
 
     def search(self, histories: Histories) -> Contacts:
-        timed = Timer.time(lambda: self._search(histories))
-        secs = timed.duration.microseconds / 1e6
-        logger.info('Contact search: %.3f seconds', secs)
-        return timed.result
+        timer = Timer.time(lambda: self._search(histories))
+        cls = self.__class__.__name__
+        self.logger.info('%s: %.2f seconds', cls, timer.seconds)
+        return timer.result
 
     def _search(self, histories: Histories) -> Contacts:
         pairs = self.pairs(histories)
@@ -45,18 +36,23 @@ class NaiveContactSearch(BaseContactSearch):
     def pairs(self, histories: Histories) -> Pairs:
         return itertools.combinations(histories, 2)
 
-    def _find_contact(self, h1, h2) -> Optional[np.ndarray]:
+    def _find_contact(
+            self, h1: np.ndarray, h2: np.ndarray) -> Optional[np.ndarray]:
         contact = None
         name1, name2 = h1['name'], h2['name']
         if name1 != name2:
             events = self._find(h1['locs'], 0, h2['locs'], 0)
             if len(events) > 0:
-                names = (name1, name2)
-                contact = model.contact(names, events)
+                contact = model.contact((name1, name2), events)
         return contact
 
-    # noinspection PyTypeChecker
-    def _find(self, locs1, i1, locs2, i2) -> List[np.ndarray]:
+    def _find(
+            self,
+            locs1: np.ndarray,
+            i1: int,
+            locs2: np.ndarray,
+            i2: int
+    ) -> List[np.ndarray]:
         events = []
         later, event, find, add_events = (
             self._later, self._event, self._find, events.extend)
@@ -94,11 +90,11 @@ class NaiveContactSearch(BaseContactSearch):
         return [model.event(start, dur)] if dur >= self.min_dur else _EMPTY
 
     @staticmethod
-    def _later(loc1, loc2):
+    def _later(loc1, loc2) -> float:
         t1, t2 = loc1['time'], loc2['time']
         return t1 if t1 > t2 else t2
 
     @staticmethod
-    def _earlier(loc1, loc2):
+    def _earlier(loc1, loc2) -> float:
         t1, t2 = loc1['time'], loc2['time']
         return t1 if t1 < t2 else t2

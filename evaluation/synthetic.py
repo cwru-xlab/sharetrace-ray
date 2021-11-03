@@ -5,7 +5,7 @@ import numpy as np
 from scipy import stats
 
 from sharetrace import model
-from sharetrace.search import kdtree, naive
+from sharetrace.search import brute, kdtree
 
 NOW = np.datetime64(datetime.datetime.utcnow(), 's')
 rng = np.random.default_rng()
@@ -72,14 +72,13 @@ def random_score(
 def main():
     min_dur = np.timedelta64(15, 'm')
     n_workers = -1
-    n_search = naive.NaiveContactSearch(min_dur=min_dur, n_workers=n_workers)
+    n_search = brute.BruteContactSearch(min_dur=min_dur, n_workers=n_workers)
     k_search = kdtree.KdTreeContactSearch(
-        min_dur=min_dur, n_workers=n_workers, eps=0, r=0.01)
+        min_dur=min_dur, n_workers=n_workers, r=0.01)
     histories = random_history(
-        100, lat_range=(0, 1), long_range=(0, 1), precision=5)
-    n_contacts = n_search.search(histories)
-    k_contacts = k_search.search(histories)
-    print(f'SIZE: naive {n_contacts.size} kd-tree {k_contacts.size}')
+        100, lat_range=(0, 1), long_range=(0, 1), precision=6)
+    print(n_search.search(histories).size)
+    print(k_search.search(histories).size)
 
 
 if __name__ == '__main__':
