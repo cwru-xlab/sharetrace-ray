@@ -1,5 +1,5 @@
 import itertools
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, final
 
 import joblib
 import numpy as np
@@ -21,6 +21,7 @@ class BruteContactSearch(BaseContactSearch):
     def __init__(self, min_dur: TimeDelta = ZERO, n_workers: int = 1, **kwargs):
         super().__init__(min_dur, n_workers, **kwargs)
 
+    @final
     def search(self, histories: Histories) -> Contacts:
         timer = Timer.time(lambda: self._search(histories))
         cls = self.__class__.__name__
@@ -28,10 +29,14 @@ class BruteContactSearch(BaseContactSearch):
         return timer.result
 
     def _search(self, histories: Histories) -> Contacts:
+        self.logger.debug('Finding pairs to search...')
         pairs = self.pairs(histories)
+        self.logger.debug('Initiating contact search...')
         par = joblib.Parallel(n_jobs=self.n_workers)
         contacts = par(joblib.delayed(self._find_contact)(*p) for p in pairs)
-        return np.array([c for c in contacts if c is not None])
+        contacts = np.array([c for c in contacts if c is not None])
+        self.logger.debug('Contact search completed')
+        return contacts
 
     def pairs(self, histories: Histories) -> Pairs:
         return itertools.combinations(histories, 2)

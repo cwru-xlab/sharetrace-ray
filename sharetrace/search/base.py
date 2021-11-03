@@ -24,11 +24,12 @@ class BaseContactSearch(ABC):
         self.min_dur = np.timedelta64(min_dur)
         self.n_workers = n_workers
         self.logger = logging.getLogger(__name__)
-        self._log_params(min_dur=self.min_dur, n_workers=n_workers, **kwargs)
+        self.log_params(min_dur=self.min_dur, n_workers=n_workers, **kwargs)
 
-    def _log_params(self, **kwargs):
+    def log_params(self, **kwargs):
         self.logger.debug(
-            'Parameters: %s',
+            '%s parameters: %s',
+            self.__class__.__name__,
             {str(k): str(v) for k, v in kwargs.items()})
 
     @abstractmethod

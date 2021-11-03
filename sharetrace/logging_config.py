@@ -5,11 +5,11 @@ config = {
     'version': 1,
     'loggers': {
         'root': {
-            'level': logging.INFO,
+            'level': logging.DEBUG,
             'handlers': ['console']
         },
         'console': {
-            'level': logging.INFO,
+            'level': logging.DEBUG,
             'handlers': ['console'],
             'propagate': False
         }
