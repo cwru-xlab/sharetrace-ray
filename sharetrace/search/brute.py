@@ -2,7 +2,8 @@ from itertools import combinations
 from typing import Iterable, List, Optional, final
 
 from joblib import Parallel, delayed
-from numpy import array, ndarray, random
+from numpy import array, ndarray
+from numpy.random import default_rng
 
 from sharetrace.model import contact, event
 from sharetrace.search.base import (
@@ -11,7 +12,7 @@ from sharetrace.search.base import (
 from sharetrace.util.timer import Timer
 from sharetrace.util.types import TimeDelta
 
-_rng = random.default_rng()
+_rng = default_rng()
 _EMPTY = ()
 
 

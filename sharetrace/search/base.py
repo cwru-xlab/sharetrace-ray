@@ -1,18 +1,19 @@
-import logging.config
 from abc import ABC, abstractmethod
+from logging import getLogger
+from logging.config import dictConfig
 from typing import Iterable, Sequence, Tuple
 
-import numpy as np
+from numpy import ndarray, timedelta64
 
 from sharetrace import logging_config
 from sharetrace.util.types import TimeDelta
 
-Histories = Sequence[np.ndarray]
-Contacts = np.ndarray
-Pairs = Iterable[Tuple[np.ndarray, np.ndarray]]
+Histories = Sequence[ndarray]
+Contacts = ndarray
+Pairs = Iterable[Tuple[ndarray, ndarray]]
 
-ZERO = np.timedelta64(0, 's')
-logging.config.dictConfig(logging_config.config)
+ZERO = timedelta64(0, 's')
+dictConfig(logging_config.config)
 
 
 class BaseContactSearch(ABC):
@@ -20,9 +21,9 @@ class BaseContactSearch(ABC):
 
     def __init__(self, min_dur: TimeDelta = ZERO, n_workers: int = 1, **kwargs):
         super().__init__()
-        self.min_dur = np.timedelta64(min_dur)
+        self.min_dur = timedelta64(min_dur)
         self.n_workers = n_workers
-        self._logger = logging.getLogger(__name__)
+        self._logger = getLogger(__name__)
         self.log_params(min_dur=self.min_dur, n_workers=n_workers, **kwargs)
 
     def log_params(self, **kwargs):

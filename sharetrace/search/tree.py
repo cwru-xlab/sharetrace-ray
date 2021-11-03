@@ -3,8 +3,9 @@ from typing import Iterable, NoReturn, Sequence, final
 
 import joblib
 import pyproj
-from numpy import (arange, array, column_stack, ndarray, repeat, sort, unique,
-                   vstack)
+from numpy import (
+    arange, array, column_stack, ndarray, repeat, sort, unique, vstack
+)
 from scipy import spatial
 from sklearn import neighbors
 
