@@ -5,7 +5,7 @@ import numpy as np
 from scipy import stats
 
 from sharetrace import model
-from sharetrace.search import brute, kdtree
+from sharetrace.search import brute, tree
 
 NOW = np.datetime64(datetime.datetime.utcnow(), 's')
 rng = np.random.default_rng()
@@ -73,12 +73,13 @@ def main():
     min_dur = np.timedelta64(15, 'm')
     n_workers = -1
     n_search = brute.BruteContactSearch(min_dur=min_dur, n_workers=n_workers)
-    k_search = kdtree.KdTreeContactSearch(
-        min_dur=min_dur, n_workers=n_workers, r=0.01)
+    k_search = tree.KdTreeContactSearch(min_dur=min_dur, n_workers=n_workers)
+    b_search = tree.BallTreeContactSearch(min_dur=min_dur, n_workers=n_workers)
     histories = random_history(
-        100, lat_range=(0, 1), long_range=(0, 1), precision=6)
+        500, lat_range=(0, 0.5), long_range=(0, 0.5), precision=6)
     print(n_search.search(histories).size)
     print(k_search.search(histories).size)
+    print(b_search.search(histories).size)
 
 
 if __name__ == '__main__':
