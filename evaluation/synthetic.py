@@ -7,8 +7,7 @@ import joblib
 import numpy as np
 from scipy import stats
 
-from sharetrace import logging_config, model
-from sharetrace.search import brute, tree
+from sharetrace import logging_config, model, search
 
 logging.config.dictConfig(logging_config.config)
 logger = logging.getLogger(__name__)
@@ -138,15 +137,14 @@ def generate_data():
 
 def main():
     generate_data()
-    min_dur = np.timedelta64(15, 'm')
-    n_workers = -1
     histories = load_histories(1_000)
-    kt_search = tree.KdTreeContactSearch(min_dur=min_dur, n_workers=n_workers)
-    kt_search.search(histories)
-    bt_search = tree.BallTreeContactSearch(min_dur=min_dur, n_workers=n_workers)
-    bt_search.search(histories)
-    b_search = brute.BruteContactSearch(min_dur=min_dur, n_workers=n_workers)
-    b_search.search(histories)
+    kwargs = {'min_dur': np.timedelta64(15, 'm'), 'n_workers': -1}
+    searches = (
+        search.KdTreeContactSearch,
+        search.BallTreeContactSearch,
+        search.BruteContactSearch)
+    for contact_search in searches:
+        contact_search(**kwargs).search(histories)
 
 
 if __name__ == '__main__':

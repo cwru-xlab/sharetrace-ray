@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
+import sharetrace.search.base
 from sharetrace import model
 from sharetrace.util.types import TimeDelta
 
@@ -24,6 +25,7 @@ def _contact_callback(
         time_buffer: np.timedelta64,
         time_constant: Real,
         transmission_rate: Real) -> np.ndarray:
+    sharetrace.search.base.Pairs
     def neighbor(contact: Any, user: Any):
         users = ne[contact]
         return users[user != users][0]

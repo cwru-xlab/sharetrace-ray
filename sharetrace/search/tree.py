@@ -1,22 +1,23 @@
-import itertools
+from itertools import chain
 from typing import Iterable, NoReturn, Sequence, final
 
 import joblib
-import numpy as np
-import pyproj as pyproj
+import pyproj
+from numpy import (arange, array, column_stack, ndarray, repeat, sort, unique,
+                   vstack)
 from scipy import spatial
 from sklearn import neighbors
 
-from sharetrace import model
+from sharetrace.model import to_coord
 from sharetrace.search.base import Histories, Pairs, ZERO
 from sharetrace.search.brute import BruteContactSearch
 from sharetrace.util.types import TimeDelta
 
-Locations = Sequence[np.ndarray]
+Locations = Sequence[ndarray]
 
 
 class TreeContactSearch(BruteContactSearch):
-    __slots__ = ('r', 'leaf_size', 'logger')
+    __slots__ = ('r', 'leaf_size')
 
     def __init__(
             self,
@@ -32,13 +33,13 @@ class TreeContactSearch(BruteContactSearch):
 
     @final
     def pairs(self, histories: Histories) -> Pairs:
-        self.logger.debug('Mapping location histories to coordinates...')
+        self._logger.debug('Mapping location histories to coordinates...')
         locs = self.to_coordinates(histories)
-        self.logger.debug('Indexing coordinates to map back to users...')
+        self._logger.debug('Indexing coordinates to map back to users...')
         idx = self.index(locs)
-        self.logger.debug('Querying pairs using spatial indexing...')
+        self._logger.debug('Querying pairs using spatial indexing...')
         pairs = self.query_pairs(locs)
-        self.logger.debug('Filtering histories based on queried pairs...')
+        self._logger.debug('Filtering histories based on queried pairs...')
         return self.filter(pairs, idx, histories)
 
     @final
@@ -48,37 +49,33 @@ class TreeContactSearch(BruteContactSearch):
 
     @staticmethod
     @final
-    def index(locations: Locations) -> np.ndarray:
-        idx = np.arange(len(locations))
+    def index(locations: Locations) -> ndarray:
+        idx = arange(len(locations))
         repeats = [len(locs) for locs in locations]
-        return np.repeat(idx, repeats)
+        return repeat(idx, repeats)
 
-    def query_pairs(self, locations: Locations) -> np.ndarray:
+    def query_pairs(self, locations: Locations) -> ndarray:
         raise NotImplementedError
 
     @final
-    def filter(
-            self,
-            pairs: np.ndarray,
-            idx: np.ndarray,
-            hists: Histories) -> Pairs:
-        unique = np.unique(idx[pairs], axis=0)
-        self._log_stats(len(hists), len(unique))
-        return ((hists[h1], hists[h2]) for (h1, h2) in unique if h1 != h2)
+    def filter(self, pairs: ndarray, idx: ndarray, hists: Histories) -> Pairs:
+        distinct = unique(idx[pairs], axis=0)
+        self._log_stats(len(hists), len(distinct))
+        return ((hists[h1], hists[h2]) for (h1, h2) in distinct if h1 != h2)
 
     @staticmethod
-    def _to_coordinates(hist: np.ndarray) -> np.ndarray:
-        return np.vstack([model.to_coord(loc)['loc'] for loc in hist['locs']])
+    def _to_coordinates(hist: ndarray) -> ndarray:
+        return vstack([to_coord(loc)['loc'] for loc in hist['locs']])
 
     @staticmethod
     @final
-    def flatten_ragged(ragged: Iterable[np.ndarray]) -> np.ndarray:
-        return np.array([*itertools.chain.from_iterable(ragged)])
+    def flatten_ragged(ragged: Iterable[ndarray]) -> ndarray:
+        return array([*chain.from_iterable(ragged)])
 
     def _log_stats(self, n_hists: int, n_pairs: int) -> NoReturn:
         n_combos = n_hists ** 2
-        percent = TreeContactSearch._percent_decrease(n_combos, n_pairs)
-        self.logger.info(
+        percent = self._percent_decrease(n_combos, n_pairs)
+        self._logger.info(
             'Pairs (tree / brute): %d / %d (%.2f percent)',
             n_pairs, n_combos, percent)
 
@@ -99,16 +96,16 @@ class BallTreeContactSearch(TreeContactSearch):
             **kwargs):
         super().__init__(min_dur, n_workers, r, leaf_size, **kwargs)
 
-    def query_pairs(self, locations: Locations) -> np.ndarray:
+    def query_pairs(self, locations: Locations) -> ndarray:
         locs = self.flatten_ragged(locations)
-        self.logger.debug('Constructing a ball tree spatial index')
+        self._logger.debug('Constructing a ball tree spatial index')
         tree = neighbors.BallTree(locs, self.leaf_size, 'haversine')
-        self.logger.debug('Querying for pairs')
+        self._logger.debug('Querying for pairs')
         points = tree.query_radius(locs, self.r)
         idx = self.index(points)
         points = self.flatten_ragged(points)
         # Sorting along the last axis ensures duplicate pairs are removed.
-        return np.sort(np.column_stack((idx, points)))
+        return sort(column_stack((idx, points)))
 
 
 class KdTreeContactSearch(TreeContactSearch):
@@ -128,15 +125,15 @@ class KdTreeContactSearch(TreeContactSearch):
         self.eps = eps
         self.p = p
 
-    def query_pairs(self, locations: Locations) -> np.ndarray:
+    def query_pairs(self, locations: Locations) -> ndarray:
         locs = self._project(self.flatten_ragged(locations))
-        self.logger.debug('Constructing a k-d tree spatial index')
+        self._logger.debug('Constructing a k-d tree spatial index')
         kd_tree = spatial.KDTree(locs, self.leaf_size)
-        self.logger.debug('Querying for pairs')
+        self._logger.debug('Querying for pairs')
         return kd_tree.query_pairs(self.r, self.p, self.eps, 'ndarray')
 
     @staticmethod
-    def _project(coordinates: np.ndarray) -> np.ndarray:
+    def _project(coordinates: ndarray) -> ndarray:
         """Project from latitude-longitude to x-y Cartesian coordinates.
 
             References:
@@ -152,5 +149,5 @@ class KdTreeContactSearch(TreeContactSearch):
         ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
         lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
         transformer = pyproj.Transformer.from_proj(lla, ecef)
-        xs, ys = transformer.transform(longs, lats, radians=False)
-        return np.column_stack((xs, ys))
+        x, y = transformer.transform(longs, lats, radians=False)
+        return column_stack((x, y))
