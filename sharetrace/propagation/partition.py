@@ -81,6 +81,7 @@ class Partition(BaseActor):
         self._start = default_timer()
         while not should_stop():
             on_next(receive())
+        # TODO Can't return directly with lewicki - send in queue to actor sys
         return self.nodes
 
     def should_stop(self) -> bool:
@@ -140,18 +141,3 @@ class Partition(BaseActor):
             self._local_inbox.append(m)
         for m in filterfalse(in_group, msgs):
             self.outbox[m['dgroup']].put(m, block=True, timeout=self.timeout)
-
-    def handle_ack(self, msg):
-        raise NotImplementedError
-
-    def handle_call(self, msg):
-        raise NotImplementedError
-
-    def handle_return(self, msg):
-        raise NotImplementedError
-
-    def handle_set(self, msg):
-        raise NotImplementedError
-
-    def should_ignore(self, msg):
-        raise NotImplementedError
