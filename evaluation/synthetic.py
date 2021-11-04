@@ -91,7 +91,7 @@ def random_score(
     logger.debug('Generating %d scores', n)
     values = stats.beta.rvs(alpha, beta, size=n)
     times = random_time(n, n_days_back)
-    return np.array([model.score(v, t) for v, t in zip(values, times)])
+    return np.array([model.risk_score(v, t) for v, t in zip(values, times)])
 
 
 def generate_histories(
@@ -137,12 +137,13 @@ def generate_data():
 
 def main():
     generate_data()
-    histories = load_histories(1_000)
-    kwargs = {'min_dur': np.timedelta64(15, 'm'), 'n_workers': -1}
+    histories = load_histories(1000)
+    kwargs = {'min_dur': np.timedelta64(15, 'm'), 'workers': -1}
     searches = (
         search.KdTreeContactSearch,
-        search.BallTreeContactSearch,
-        search.BruteContactSearch)
+        # search.BallTreeContactSearch,
+        # search.BruteContactSearch
+    )
     for contact_search in searches:
         contact_search(**kwargs).search(histories)
 

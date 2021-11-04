@@ -1,5 +1,5 @@
 from itertools import combinations
-from typing import Iterable, List, Optional, final
+from typing import Iterable, List, Optional
 
 from joblib import Parallel, delayed
 from numpy import array, ndarray
@@ -19,21 +19,20 @@ _EMPTY = ()
 class BruteContactSearch(BaseContactSearch):
     __slots__ = ()
 
-    def __init__(self, min_dur: TimeDelta = ZERO, n_workers: int = 1, **kwargs):
-        super().__init__(min_dur, n_workers, **kwargs)
+    def __init__(self, min_dur: TimeDelta = ZERO, workers: int = 1, **kwargs):
+        super().__init__(min_dur, workers, **kwargs)
 
-    @final
     def search(self, histories: Histories) -> Contacts:
         timer = Timer.time(lambda: self._search(histories))
-        cls = self.__class__.__name__
-        self._logger.info('%s: %.2f seconds', cls, timer.seconds)
+        self._logger.info(
+            '%s: %.2f seconds', self.__class__.__name__, timer.seconds)
         return timer.result
 
     def _search(self, histories: Histories) -> Contacts:
         self._logger.debug('Finding pairs to search...')
         pairs = self.pairs(histories)
         self._logger.debug('Initiating contact search...')
-        par = Parallel(n_jobs=self.n_workers)
+        par = Parallel(n_jobs=self.workers)
         contacts = par(delayed(self._find_contact)(*p) for p in pairs)
         contacts = array([c for c in contacts if c is not None])
         self._logger.debug('Contact search completed')
@@ -43,13 +42,13 @@ class BruteContactSearch(BaseContactSearch):
         return combinations(histories, 2)
 
     def _find_contact(self, h1: ndarray, h2: ndarray) -> Optional[ndarray]:
-        contact_ = None
+        found = None
         name1, name2 = h1['name'], h2['name']
         if name1 != name2:
             events = self._find(h1['locs'], 0, h2['locs'], 0)
             if len(events) > 0:
-                contact_ = contact((name1, name2), events)
-        return contact_
+                found = contact((name1, name2), events)
+        return found
 
     def _find(
             self,

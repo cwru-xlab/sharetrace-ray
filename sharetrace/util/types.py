@@ -1,7 +1,7 @@
-import datetime
+from datetime import datetime, timedelta
 from typing import Union
 
-import numpy as np
+from numpy import datetime64, timedelta64
 
-TimeDelta = Union[datetime.timedelta, np.timedelta64]
-DateTime = Union[datetime.datetime, np.datetime64]
+TimeDelta = Union[timedelta, timedelta64]
+DateTime = Union[datetime, datetime64]
