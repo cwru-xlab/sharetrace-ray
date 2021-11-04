@@ -25,7 +25,7 @@ class Partition(BaseActor):
     __slots__ = (
         'graph',
         'nodes',
-        'group_id'
+        'group'
         'send_thresh',
         'time_buffer',
         'time_const',
@@ -42,7 +42,7 @@ class Partition(BaseActor):
             self,
             graph: Mapping[Hashable, Mapping],
             nodes: MutableMapping[Hashable, ndarray],
-            group_id: int,
+            group: int,
             name: Optional[Hashable] = None,
             send_thresh: float = 0.75,
             time_buffer: TimeDelta = TWO_DAYS,
@@ -54,7 +54,7 @@ class Partition(BaseActor):
         super().__init__(name)
         self.graph = graph
         self.nodes = nodes
-        self.group_id = group_id
+        self.group = group
         self.send_thresh = send_thresh
         self.time_buffer = timedelta64(time_buffer)
         self.time_const = time_const
@@ -70,16 +70,16 @@ class Partition(BaseActor):
     @staticmethod
     def _seconds(delta: Optional[TimeDelta]) -> Optional[float]:
         if isinstance(delta, timedelta64):
-            delta = np.float_(timedelta64(delta, 'us')) / 1e6
+            delta = np.float_(timedelta64(delta, 'us'))
         elif isinstance(delta, timedelta):
-            delta = delta.microseconds / 1e6
-        return delta
+            delta = delta.microseconds
+        return delta / 1e6
 
     def run(self) -> Mapping[Hashable, ndarray]:
         should_stop, receive, on_next = (
             self.should_stop, self.receive, self.on_next)
         self._start = default_timer()
-        while not should_stop:
+        while not should_stop():
             on_next(receive())
         return self.nodes
 
@@ -87,7 +87,8 @@ class Partition(BaseActor):
         too_long = False
         if self.max_dur is not None:
             too_long = (default_timer() - self._start) >= self.max_dur
-        no_updates = self._since_update > self.early_stop
+        no_updates = self._since_update >= self.early_stop
+        # TODO Add logic to flip this timed_out flag
         return self._timed_out or too_long or no_updates
 
     def receive(self):
@@ -95,43 +96,38 @@ class Partition(BaseActor):
         return self.inbox.get(block=True, timeout=self.timeout)
 
     def on_next(self, msg: ndarray) -> NoReturn:
-        kind = msg['kind']
-        if kind == _USER:
+        if msg['kind'] == _USER:
             self._on_user_msg(msg)
-        elif kind == _CONTACT:
-            self._on_contact_msg(msg)
         else:
-            # Log unknown message
-            pass
+            self._on_contact_msg(msg)
 
     def _on_contact_msg(self, msg: ndarray) -> NoReturn:
         # Wrap the value since there can be multiple initial scores.
-        contact, user, sgroup, scores = (
-            msg['src'], msg['sgroup'], msg['dest'], array([msg['val']]))
-        self._update(user, scores[0])
-        contacts = self.graph[user]['ne']
+        factor, var, vgroup, scores = (
+            msg['src'], msg['dest'], msg['dgroup'], array([msg['val']]))
+        self._update(var, scores[0])
+        factors = self.graph[var]['ne']
         self.send(*(
-            message(scores, user, sgroup, c, self.graph[c]['group'], _USER)
-            for c in contacts if c != contact))
+            message(scores, var, vgroup, f, self.graph[f]['group'], _USER)
+            for f in factors if f != factor))
 
     def _on_user_msg(self, msg: ndarray) -> NoReturn:
-        user, sgroup, contact, dgroup, scores = (
-            msg['src'], msg['sgroup'], msg['dest'], msg['dgroup'], msg['val'])
-        users = self.graph[contact]['ne']
-        ne = users[user != users][0]
-        ngroup = self.graph[ne]['group']
-        recent = self.graph[contact]['data']['time']
+        var, factor, fgroup, scores = (
+            msg['src'], msg['dest'], msg['dgroup'], msg['val'])
+        variables = self.graph[factor]['ne']
+        var = variables[var != variables][0]
+        vgroup = self.graph[var]['group']
+        recent = self.graph[factor]['data']['time']
         times = scores['time']
         scores = scores[times <= recent + self.time_buffer]
-        if scores.size > 0:
-            diff = (times - recent) / _DAY
-            clip(diff, -inf, 0, out=diff)
+        if len(scores) > 0:
+            diff = clip((times - recent) / _DAY, -inf, 0)
             weight = diff / self.time_const
             max_score = scores[argmax(log(scores['val']) + weight)]
             max_score['val'] *= self.transmission
-            msg = message(max_score, contact, dgroup, ne, ngroup, _CONTACT)
+            msg = message(max_score, factor, fgroup, var, vgroup, _CONTACT)
         else:
-            msg = message(_DEFAULT_MSG, contact, dgroup, ne, ngroup, _CONTACT)
+            msg = message(_DEFAULT_MSG, factor, fgroup, var, vgroup, _CONTACT)
         self.send(array([msg]))
 
     def _update(self, node: int, msg: np.ndarray) -> NoReturn:
@@ -139,7 +135,7 @@ class Partition(BaseActor):
         self.nodes[node] = np.sort((curr, msg), order=('val', 'time'))[-1]
 
     def send(self, *msgs: ndarray) -> NoReturn:
-        in_group = functools.partial(lambda msg: msg['dgroup'] == self.group_id)
+        in_group = functools.partial(lambda msg: msg['dgroup'] == self.group)
         for m in filter(in_group, msgs):
             self._local_inbox.append(m)
         for m in filterfalse(in_group, msgs):
