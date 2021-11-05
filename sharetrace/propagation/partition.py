@@ -99,16 +99,18 @@ class Partition(BaseActor):
             self._on_contact_msg(msg)
 
     def _on_contact_msg(self, msg: ndarray) -> NoReturn:
-        factor, var, vgroup = msg['src'], msg['dest'], msg['dgroup']
-        if msg['val'] <= self.nodes[var]['val']:
+        factor, var, vgroup, score = (
+            msg['src'], msg['dest'], msg['dgroup'], msg['val'])
+        nodes = self.nodes
+        if score <= nodes[var]['val']:
             self._since_update += 1
         else:
-            self.nodes[var] = msg
+            nodes[var] = msg
             self._since_update = 0
             graph = self.graph
             factors = graph[var]['ne']
             # Wrap the value since there can be multiple initial scores.
-            scores = array([msg['val']])
+            scores = array([score])
             self.send(*(
                 message(scores, var, vgroup, f, graph[f]['group'], _USER)
                 for f in factors if f != factor))
@@ -116,10 +118,11 @@ class Partition(BaseActor):
     def _on_user_msg(self, msg: ndarray) -> NoReturn:
         var, factor, fgroup, scores = (
             msg['src'], msg['dest'], msg['dgroup'], msg['val'])
-        variables = self.graph[factor]['ne']
+        graph = self.graph
+        variables = graph[factor]['ne']
         v_ne = variables[var != variables][0]
-        vgroup = self.graph[v_ne]['group']
-        recent = self.graph[factor]['data']['time']
+        vgroup = graph[v_ne]['group']
+        recent = graph[factor]['data']['time']
         times = scores['time']
         scores = scores[times <= recent + self.time_buffer]
         if len(scores) > 0:
@@ -133,10 +136,10 @@ class Partition(BaseActor):
         self.send(array([msg]))
 
     def send(self, *msgs: ndarray) -> NoReturn:
-        push, push_local = self._push, self._push_local
-        for msg in filter(self._is_local, msgs):
+        push, push_local, local = self._push, self._push_local, self._is_local
+        for msg in filter(local, msgs):
             push_local(msg)
-        for msg in filterfalse(self._is_local, msgs):
+        for msg in filterfalse(local, msgs):
             push(msg['dgroup'], msg)
 
     def _is_local(self, msg: ndarray) -> bool:
