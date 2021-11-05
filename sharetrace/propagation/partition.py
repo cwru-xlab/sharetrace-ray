@@ -3,7 +3,7 @@ from datetime import timedelta
 from itertools import filterfalse
 from queue import Empty
 from timeit import default_timer
-from typing import Hashable, Mapping, MutableMapping, NoReturn, Optional
+from typing import Any, Hashable, Mapping, MutableMapping, NoReturn, Optional
 
 from numpy import (argmax, array, clip, datetime64, float_, inf, log, ndarray,
                    timedelta64)
@@ -12,6 +12,7 @@ from lewicki.lewicki.actors import BaseActor
 from sharetrace.model import message, risk_score
 from sharetrace.util.types import TimeDelta
 
+_ACTOR_SYSTEM = 0
 _CONTACT = 1
 _USER = 2
 _DAY = timedelta64(1, 'D')
@@ -73,14 +74,13 @@ class Partition(BaseActor):
             delta = delta.microseconds
         return delta / 1e6
 
-    def run(self) -> Mapping[Hashable, ndarray]:
+    def run(self) -> NoReturn:
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
         self._start = default_timer()
         while not stop():
             if (msg := receive()) is not None:
                 on_next(msg)
-        # TODO Can't return directly with lewicki - send in queue to actor sys
-        return self.nodes
+        self._push(_ACTOR_SYSTEM, self.nodes)
 
     def should_stop(self) -> bool:
         too_long = False
@@ -155,5 +155,5 @@ class Partition(BaseActor):
             msg, self._timed_out = None, True
         return msg
 
-    def _push(self, key: Hashable, msg: ndarray) -> NoReturn:
+    def _push(self, key: Hashable, msg: Any) -> NoReturn:
         self.outbox[key].put(msg, block=True, timeout=self.timeout)
