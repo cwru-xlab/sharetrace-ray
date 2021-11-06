@@ -108,10 +108,10 @@ class Partition(BaseActor):
         factor, var, vgroup, score = (
             msg['src'], msg['dest'], msg['dgroup'], msg['val'])
         graph, nodes, send = self.graph, self.nodes, self.send
-        if score <= nodes[var]['val']:
+        if (val := score['val']) <= nodes[var]:
             self._since_update += 1
         else:
-            self._since_update, nodes[var] = 0, msg
+            self._since_update, nodes[var] = 0, val
             factors = graph[var]['ne']
             scores = array([score])
             for f in factors[factor != factors]:
