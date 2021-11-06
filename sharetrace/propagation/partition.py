@@ -4,16 +4,16 @@ from queue import Empty
 from timeit import default_timer
 from typing import Any, Hashable, Mapping, MutableMapping, NoReturn, Optional
 
-from numpy import (all, argmax, array, clip, float_, inf, log, ndarray,
-                   timedelta64, void)
+from numpy import (argmax, array, clip, float_, inf, log, ndarray, timedelta64,
+                   void)
 
 from lewicki.lewicki.actors import BaseActor
 from sharetrace.model import message
 from sharetrace.util.types import TimeDelta
 
 _ACTOR_SYSTEM = 0
-_CONTACT = 1
-_USER = 2
+_FACTOR = 1
+_VAR = 2
 _DAY = timedelta64(1, 'D')
 _TWO_DAYS = timedelta64(172_800, 's')
 
@@ -30,7 +30,6 @@ class Partition(BaseActor):
         'timeout',
         'max_dur',
         'early_stop',
-        '_local_inbox',
         '_start',
         '_since_update',
         '_timed_out')
@@ -49,6 +48,8 @@ class Partition(BaseActor):
             max_dur: Optional[TimeDelta] = None,
             early_stop: int = inf):
         super().__init__(name)
+        # noinspection PyTypeChecker
+        self.outbox[group] = deque()
         self.graph = graph
         self.nodes = nodes
         self.group = group
@@ -59,7 +60,6 @@ class Partition(BaseActor):
         self.timeout = self._seconds(timeout)
         self.max_dur = self._seconds(max_dur)
         self.early_stop = early_stop
-        self._local_inbox = deque()
         self._start = None
         self._since_update = 0
         self._timed_out = False
@@ -78,7 +78,7 @@ class Partition(BaseActor):
         while not stop():
             if (msg := receive()) is not None:
                 on_next(msg)
-        self._push(self.nodes, _ACTOR_SYSTEM)
+        self.send(self.nodes, _ACTOR_SYSTEM)
 
     def should_stop(self) -> bool:
         too_long = False
@@ -87,36 +87,39 @@ class Partition(BaseActor):
         no_updates = self._since_update >= self.early_stop
         return self._timed_out or too_long or no_updates
 
+    # noinspection PyTypeChecker,PyUnresolvedReferences
     def receive(self) -> Optional[void]:
-        return self._pop_local() if len(self._local_inbox) > 0 else self._pop()
+        if len((local := self.outbox[self.group])) > 0:
+            msg = local.popleft()
+        else:
+            try:
+                msg = self.inbox.get(block=True, timeout=self.timeout)
+            except Empty:
+                msg, self._timed_out = None, True
+        return msg
 
     def on_next(self, msg: void) -> NoReturn:
-        if msg['kind'] == _USER:
-            self._on_user_msg(msg)
+        if msg['kind'] == _VAR:
+            self._on_variable_msg(msg)
         else:
-            self._on_contact_msg(msg)
+            self._on_factor_msg(msg)
 
-    def _on_contact_msg(self, msg: void) -> NoReturn:
-        # Message value contains exactly 1 score.
+    def _on_factor_msg(self, msg: void) -> NoReturn:
         factor, var, vgroup, score = (
             msg['src'], msg['dest'], msg['dgroup'], msg['val'])
-        nodes = self.nodes
+        graph, nodes, send = self.graph, self.nodes, self.send
         if score <= nodes[var]['val']:
             self._since_update += 1
         else:
-            nodes[var] = msg
-            self._since_update = 0
-            graph = self.graph
+            self._since_update, nodes[var] = 0, msg
             factors = graph[var]['ne']
             scores = array([score])
-            send = self.send
             for f in factors[factor != factors]:
-                send(message(scores, var, vgroup, f, graph[f]['group'], _USER))
+                send(message(scores, var, vgroup, f, graph[f]['group'], _VAR))
 
-    def _on_user_msg(self, msg: void) -> NoReturn:
-        # Message value contains 1 or more scores.
+    def _on_variable_msg(self, maximum: void) -> NoReturn:
         var, factor, fgroup, scores = (
-            msg['src'], msg['dest'], msg['dgroup'], msg['val'])
+            maximum['src'], maximum['dest'], maximum['dgroup'], maximum['val'])
         graph = self.graph
         variables = graph[factor]['ne']
         v_ne = variables[var != variables][0]
@@ -127,32 +130,14 @@ class Partition(BaseActor):
         if len(scores) > 0:
             diff = clip((times - recent) / _DAY, -inf, 0)
             weight = diff / self.time_const
-            max_score = scores[argmax(log(scores['val']) + weight)]
-            max_score['val'] *= self.transmission
-            msg = message(max_score, factor, fgroup, v_ne, vgroup, _CONTACT)
-            self.send(msg)
+            maximum = scores[argmax(log(scores['val']) + weight)]
+            maximum['val'] *= self.transmission
+            self.send(message(maximum, factor, fgroup, v_ne, vgroup, _FACTOR))
 
-    def send(self, msg: void) -> NoReturn:
-        if self._is_local(msg):
-            self._push_local(msg)
+    def send(self, msg: Any, key: Hashable = None) -> NoReturn:
+        key = key if key is not None else msg['dgroup']
+        if key == self.group:
+            # noinspection PyUnresolvedReferences
+            self.outbox[key].append(msg)
         else:
-            self._push(msg, msg['dgroup'])
-
-    def _is_local(self, msg: void) -> bool:
-        return all(msg['dgroup'] == self.group)
-
-    def _push_local(self, msg: void) -> NoReturn:
-        self._local_inbox.append(msg)
-
-    def _pop_local(self) -> void:
-        return self._local_inbox.popleft()
-
-    def _pop(self) -> Optional[void]:
-        try:
-            msg = self.inbox.get(block=True, timeout=self.timeout)
-        except Empty:
-            msg, self._timed_out = None, True
-        return msg
-
-    def _push(self, msg: Any, key: Hashable) -> NoReturn:
-        self.outbox[key].put(msg, block=True, timeout=self.timeout)
+            self.outbox[key].put(msg, block=True, timeout=self.timeout)
