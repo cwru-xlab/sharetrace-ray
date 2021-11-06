@@ -117,9 +117,9 @@ class Partition(BaseActor):
             for f in factors[factor != factors]:
                 send(message(scores, var, vgroup, f, graph[f]['group'], _VAR))
 
-    def _on_variable_msg(self, maximum: void) -> NoReturn:
+    def _on_variable_msg(self, msg: void) -> NoReturn:
         var, factor, fgroup, scores = (
-            maximum['src'], maximum['dest'], maximum['dgroup'], maximum['val'])
+            msg['src'], msg['dest'], msg['dgroup'], msg['val'])
         graph = self.graph
         variables = graph[factor]['ne']
         v_ne = variables[var != variables][0]
