@@ -1,7 +1,7 @@
 from typing import List, Tuple, Union, overload
 
 from numpy import (array, datetime64, float32, int32, int8, ndarray, sort,
-                   timedelta64)
+                   timedelta64, void)
 from pygeohash import decode, encode
 
 from sharetrace.util.types import DateTime, TimeDelta
@@ -11,7 +11,7 @@ Location = Union[str, Coordinate]
 ArrayLike = Union[ndarray, List, Tuple]
 
 
-def risk_score(val: float, time: DateTime) -> ndarray:
+def risk_score(val: float, time: DateTime) -> void:
     """Creates a timestamped risk probability.
 
     Args:
@@ -27,14 +27,14 @@ def risk_score(val: float, time: DateTime) -> ndarray:
 
 
 @overload
-def temporal_loc(loc: Coordinate, time: DateTime) -> ndarray: ...
+def temporal_loc(loc: Coordinate, time: DateTime) -> void: ...
 
 
 @overload
-def temporal_loc(loc: str, time: DateTime) -> ndarray: ...
+def temporal_loc(loc: str, time: DateTime) -> void: ...
 
 
-def temporal_loc(loc: Location, time: DateTime) -> ndarray:
+def temporal_loc(loc: Location, time: DateTime) -> void:
     """Creates a temporal location.
 
         Args:
@@ -52,18 +52,18 @@ def temporal_loc(loc: Location, time: DateTime) -> ndarray:
     return array([(loc, time)], dtype=dt)[0]
 
 
-def to_geohash(coord: ndarray, prec: int = 12) -> ndarray:
+def to_geohash(coord: ndarray, prec: int = 12) -> void:
     lat, long = coord['loc']
     geohash = encode(lat, long, prec)
     return temporal_loc(geohash, coord['time'])
 
 
-def to_coord(geohash: ndarray) -> ndarray:
+def to_coord(geohash: ndarray) -> void:
     lat, long = decode(geohash['loc'])
     return temporal_loc((lat, long), geohash['time'])
 
 
-def event(time: DateTime, dur: TimeDelta) -> ndarray:
+def event(time: DateTime, dur: TimeDelta) -> void:
     """Creates a timestamped duration, where the timestamp indicates the start.
 
     Args:
@@ -78,7 +78,7 @@ def event(time: DateTime, dur: TimeDelta) -> ndarray:
     return array([(time, dur)], dtype=dt)[0]
 
 
-def contact(names: ArrayLike, events: ArrayLike) -> ndarray:
+def contact(names: ArrayLike, events: ArrayLike) -> void:
     """Creates a named set of events.
 
     Args:
@@ -98,7 +98,7 @@ def contact(names: ArrayLike, events: ArrayLike) -> ndarray:
     return array([(names, time, dur)], dtype=dt)[0]
 
 
-def history(locs: ArrayLike, name: int) -> ndarray:
+def history(locs: ArrayLike, name: int) -> void:
     """Creates a named and sorted location history.
 
     Args:
@@ -119,7 +119,7 @@ def message(
         sgroup: int,
         dest: int,
         dgroup: int,
-        kind: int) -> ndarray:
+        kind: int) -> void:
     """Creates a message used for passing information between objects.
 
     Args:

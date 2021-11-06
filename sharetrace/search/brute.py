@@ -73,6 +73,7 @@ class BruteContactSearch(BaseContactSearch):
                     start = later(loc1, loc2)
             elif started:
                 started = False
+                # noinspection PyUnboundLocalVariable
                 add_events(create_event(start, loc1, loc2))
             elif loc1['time'] < loc2['time']:
                 i1 += 1

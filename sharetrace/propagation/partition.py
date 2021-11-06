@@ -1,22 +1,20 @@
 from collections import deque
 from datetime import timedelta
-from itertools import filterfalse
 from queue import Empty
 from timeit import default_timer
 from typing import Any, Hashable, Mapping, MutableMapping, NoReturn, Optional
 
-from numpy import (argmax, array, clip, datetime64, float_, inf, log, ndarray,
-                   timedelta64)
+from numpy import (all, argmax, array, clip, float_, inf, log, ndarray,
+                   timedelta64, void)
 
 from lewicki.lewicki.actors import BaseActor
-from sharetrace.model import message, risk_score
+from sharetrace.model import message
 from sharetrace.util.types import TimeDelta
 
 _ACTOR_SYSTEM = 0
 _CONTACT = 1
 _USER = 2
 _DAY = timedelta64(1, 'D')
-_DEFAULT_MSG = risk_score(0, datetime64('0'))
 _TWO_DAYS = timedelta64(172_800, 's')
 
 
@@ -80,7 +78,7 @@ class Partition(BaseActor):
         while not stop():
             if (msg := receive()) is not None:
                 on_next(msg)
-        self._push(_ACTOR_SYSTEM, self.nodes)
+        self._push(self.nodes, _ACTOR_SYSTEM)
 
     def should_stop(self) -> bool:
         too_long = False
@@ -89,16 +87,17 @@ class Partition(BaseActor):
         no_updates = self._since_update >= self.early_stop
         return self._timed_out or too_long or no_updates
 
-    def receive(self) -> Optional[ndarray]:
+    def receive(self) -> Optional[void]:
         return self._pop_local() if len(self._local_inbox) > 0 else self._pop()
 
-    def on_next(self, msg: ndarray) -> NoReturn:
+    def on_next(self, msg: void) -> NoReturn:
         if msg['kind'] == _USER:
             self._on_user_msg(msg)
         else:
             self._on_contact_msg(msg)
 
-    def _on_contact_msg(self, msg: ndarray) -> NoReturn:
+    def _on_contact_msg(self, msg: void) -> NoReturn:
+        # Message value contains exactly 1 score.
         factor, var, vgroup, score = (
             msg['src'], msg['dest'], msg['dgroup'], msg['val'])
         nodes = self.nodes
@@ -109,13 +108,13 @@ class Partition(BaseActor):
             self._since_update = 0
             graph = self.graph
             factors = graph[var]['ne']
-            # Wrap the value since there can be multiple initial scores.
             scores = array([score])
-            self.send(*(
-                message(scores, var, vgroup, f, graph[f]['group'], _USER)
-                for f in factors if f != factor))
+            send = self.send
+            for f in factors[factor != factors]:
+                send(message(scores, var, vgroup, f, graph[f]['group'], _USER))
 
-    def _on_user_msg(self, msg: ndarray) -> NoReturn:
+    def _on_user_msg(self, msg: void) -> NoReturn:
+        # Message value contains 1 or more scores.
         var, factor, fgroup, scores = (
             msg['src'], msg['dest'], msg['dgroup'], msg['val'])
         graph = self.graph
@@ -131,32 +130,29 @@ class Partition(BaseActor):
             max_score = scores[argmax(log(scores['val']) + weight)]
             max_score['val'] *= self.transmission
             msg = message(max_score, factor, fgroup, v_ne, vgroup, _CONTACT)
+            self.send(msg)
+
+    def send(self, msg: void) -> NoReturn:
+        if self._is_local(msg):
+            self._push_local(msg)
         else:
-            msg = message(_DEFAULT_MSG, factor, fgroup, v_ne, vgroup, _CONTACT)
-        self.send(array([msg]))
+            self._push(msg, msg['dgroup'])
 
-    def send(self, *msgs: ndarray) -> NoReturn:
-        push, push_local, local = self._push, self._push_local, self._is_local
-        for msg in filter(local, msgs):
-            push_local(msg)
-        for msg in filterfalse(local, msgs):
-            push(msg['dgroup'], msg)
+    def _is_local(self, msg: void) -> bool:
+        return all(msg['dgroup'] == self.group)
 
-    def _is_local(self, msg: ndarray) -> bool:
-        return msg['dgroup'] == self.group
-
-    def _push_local(self, msg: ndarray) -> NoReturn:
+    def _push_local(self, msg: void) -> NoReturn:
         self._local_inbox.append(msg)
 
-    def _pop_local(self) -> ndarray:
+    def _pop_local(self) -> void:
         return self._local_inbox.popleft()
 
-    def _pop(self) -> Optional[ndarray]:
+    def _pop(self) -> Optional[void]:
         try:
             msg = self.inbox.get(block=True, timeout=self.timeout)
         except Empty:
             msg, self._timed_out = None, True
         return msg
 
-    def _push(self, key: Hashable, msg: Any) -> NoReturn:
+    def _push(self, msg: Any, key: Hashable) -> NoReturn:
         self.outbox[key].put(msg, block=True, timeout=self.timeout)
