@@ -1,10 +1,8 @@
-from itertools import chain
-from typing import Iterable, NoReturn, Sequence
+from typing import NoReturn, Sequence
 
 from joblib import Parallel, delayed
-from numpy import (
-    arange, array, column_stack, ndarray, repeat, sort, unique, vstack
-)
+from numpy import (arange, column_stack, concatenate, ndarray, repeat, sort,
+                   unique, vstack)
 from pyproj import Proj, Transformer
 from scipy.spatial import KDTree
 from sklearn.neighbors import BallTree
@@ -38,7 +36,7 @@ class TreeContactSearch(BruteContactSearch):
         self._logger.debug('Indexing coordinates to map back to users...')
         idx = self.index(locs)
         self._logger.debug('Querying pairs using spatial indexing...')
-        pairs = self.query_pairs(locs)
+        pairs = self.query_pairs(concatenate(locs))
         self._logger.debug('Filtering histories based on queried pairs...')
         return self.filter(pairs, idx, histories)
 
@@ -52,7 +50,7 @@ class TreeContactSearch(BruteContactSearch):
         repeats = [len(locs) for locs in locations]
         return repeat(idx, repeats)
 
-    def query_pairs(self, locations: Locations) -> ndarray:
+    def query_pairs(self, locs: ndarray) -> ndarray:
         raise NotImplementedError
 
     def filter(self, pairs: ndarray, idx: ndarray, hists: Histories) -> Pairs:
@@ -63,10 +61,6 @@ class TreeContactSearch(BruteContactSearch):
     @staticmethod
     def _to_coordinates(hist: ndarray) -> ndarray:
         return vstack([to_coord(loc)['loc'] for loc in hist['locs']])
-
-    @staticmethod
-    def flatten_ragged(ragged: Iterable[ndarray]) -> ndarray:
-        return array([*chain.from_iterable(ragged)])
 
     def _log_stats(self, hists: int, pairs: int) -> NoReturn:
         combos = hists ** 2
@@ -91,14 +85,13 @@ class BallTreeContactSearch(TreeContactSearch):
             **kwargs):
         super().__init__(min_dur, workers, r, leaf_size, **kwargs)
 
-    def query_pairs(self, locations: Locations) -> ndarray:
-        locs = self.flatten_ragged(locations)
+    def query_pairs(self, locs: ndarray) -> ndarray:
         self._logger.debug('Constructing a ball tree spatial index')
         ball_tree = BallTree(locs, self.leaf_size, 'haversine')
         self._logger.debug('Querying for pairs')
         points = ball_tree.query_radius(locs, self.r)
         idx = self.index(points)
-        points = self.flatten_ragged(points)
+        points = concatenate(points)
         # Sorting along the last axis ensures duplicate pairs are removed.
         return sort(column_stack((idx, points)))
 
@@ -119,8 +112,8 @@ class KdTreeContactSearch(TreeContactSearch):
         self.eps = eps
         self.p = p
 
-    def query_pairs(self, locations: Locations) -> ndarray:
-        locs = self._project(self.flatten_ragged(locations))
+    def query_pairs(self, locs: ndarray) -> ndarray:
+        locs = self._project(locs)
         self._logger.debug('Constructing a k-d tree spatial index')
         kd_tree = KDTree(locs, self.leaf_size)
         self._logger.debug('Querying for pairs')
@@ -143,5 +136,4 @@ class KdTreeContactSearch(TreeContactSearch):
         ecef = Proj(proj='geocent', ellps='WGS84', datum='WGS84')
         lla = Proj(proj='latlong', ellps='WGS84', datum='WGS84')
         transformer = Transformer.from_proj(lla, ecef)
-        x, y = transformer.transform(longs, lats, radians=False)
-        return column_stack((x, y))
+        return column_stack(transformer.transform(longs, lats, radians=False))

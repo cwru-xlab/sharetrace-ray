@@ -140,12 +140,12 @@ def main():
     histories = load_histories(1000)
     kwargs = {'min_dur': np.timedelta64(15, 'm'), 'workers': -1}
     searches = (
-        search.KdTreeContactSearch,
-        # search.BallTreeContactSearch,
-        # search.BruteContactSearch
+        search.KdTreeContactSearch(**kwargs),
+        # search.BallTreeContactSearch(**kwargs),
+        # search.BruteContactSearch(**kwargs)
     )
     for contact_search in searches:
-        contact_search(**kwargs).search(histories)
+        contact_search.search(histories)
 
 
 if __name__ == '__main__':
