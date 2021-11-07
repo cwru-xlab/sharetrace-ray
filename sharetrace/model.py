@@ -4,7 +4,7 @@ from numpy import (array, datetime64, float32, int32, int8, ndarray, sort,
                    timedelta64, void)
 from pygeohash import decode, encode
 
-from sharetrace.util.types import DateTime, TimeDelta
+from sharetrace.util import DateTime, TimeDelta
 
 Coordinate = Tuple[float, float]
 Location = Union[str, Coordinate]

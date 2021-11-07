@@ -7,9 +7,9 @@ from typing import Any, Hashable, Mapping, MutableMapping, NoReturn, Optional
 from numpy import (argmax, array, clip, float_, inf, log, ndarray, timedelta64,
                    void)
 
-from lewicki.lewicki.actors import BaseActor
+from lewicki.lewicki.actors import ActorSystem, BaseActor
 from sharetrace.model import message
-from sharetrace.util.types import TimeDelta
+from sharetrace.util import TimeDelta
 
 _ACTOR_SYSTEM = 0
 _FACTOR = 1
@@ -22,7 +22,7 @@ class Partition(BaseActor):
     __slots__ = (
         'graph',
         'nodes',
-        'group'
+        'group',
         'send_thresh',
         'time_buffer',
         'time_const',
@@ -141,3 +141,36 @@ class Partition(BaseActor):
             self.outbox[key].append(msg)
         else:
             self.outbox[key].put(msg, block=True, timeout=self.timeout)
+
+
+class RiskPropagation(ActorSystem):
+    __slots__ = (
+        'graph',
+        'nodes',
+        'send_thresh',
+        'time_buffer',
+        'time_const',
+        'transmission',
+        'timeout',
+        'max_dur')
+
+    def __init__(
+            self,
+            graph: Mapping[Hashable, Mapping],
+            nodes: MutableMapping[Hashable, ndarray],
+            group: int,
+            name: Optional[Hashable] = None,
+            send_thresh: float = 0.75,
+            time_buffer: TimeDelta = _TWO_DAYS,
+            time_const: float = 1,
+            transmission: float = 0.8,
+            timeout: Optional[TimeDelta] = None,
+            max_dur: Optional[TimeDelta] = None,
+            early_stop: int = inf):
+        super().__init__()
+
+    def call(self, scores: ndarray, contacts: ndarray) -> ndarray:
+        ...
+
+    def create_graph(self, contacts: ndarray, n_parts: int = 1):
+        ...
