@@ -15,7 +15,7 @@ _ACTOR_SYSTEM = 0
 _FACTOR = 1
 _VAR = 2
 _DAY = timedelta64(1, 'D')
-_TWO_DAYS = timedelta64(172_800, 's')
+TWO_DAYS = timedelta64(172_800, 's')
 
 
 class Partition(BaseActor):
@@ -41,7 +41,7 @@ class Partition(BaseActor):
             group: int,
             name: Optional[Hashable] = None,
             send_thresh: float = 0.75,
-            time_buffer: TimeDelta = _TWO_DAYS,
+            time_buffer: TimeDelta = TWO_DAYS,
             time_const: float = 1,
             transmission: float = 0.8,
             timeout: Optional[TimeDelta] = None,
@@ -81,10 +81,11 @@ class Partition(BaseActor):
         self.send(self.nodes, _ACTOR_SYSTEM)
 
     def should_stop(self) -> bool:
-        too_long = False
+        too_long, no_updates = False, False
         if self.max_dur is not None:
             too_long = (default_timer() - self._start) >= self.max_dur
-        no_updates = self._since_update >= self.early_stop
+        if self.early_stop is not None:
+            no_updates = self._since_update >= self.early_stop
         return self._timed_out or too_long or no_updates
 
     # noinspection PyTypeChecker,PyUnresolvedReferences
@@ -145,31 +146,36 @@ class Partition(BaseActor):
 
 class RiskPropagation(ActorSystem):
     __slots__ = (
-        'graph',
-        'nodes',
         'send_thresh',
         'time_buffer',
         'time_const',
         'transmission',
         'timeout',
-        'max_dur')
+        'max_dur',
+        'early_stop')
 
     def __init__(
             self,
-            graph: Mapping[Hashable, Mapping],
-            nodes: MutableMapping[Hashable, ndarray],
-            group: int,
-            name: Optional[Hashable] = None,
             send_thresh: float = 0.75,
-            time_buffer: TimeDelta = _TWO_DAYS,
+            time_buffer: int = 172_800,
             time_const: float = 1,
             transmission: float = 0.8,
-            timeout: Optional[TimeDelta] = None,
-            max_dur: Optional[TimeDelta] = None,
-            early_stop: int = inf):
-        super().__init__()
+            timeout: Optional[float] = None,
+            max_dur: Optional[float] = None,
+            early_stop: Optional[int] = None):
+        super().__init__(0)
+        self.send_thresh = send_thresh
+        self.time_buffer = time_buffer
+        self.time_const = time_const
+        self.transmission = transmission
+        self.timeout = timeout
+        self.max_dur = max_dur
+        self.early_stop = early_stop
 
-    def call(self, scores: ndarray, contacts: ndarray) -> ndarray:
+    def compute(self, scores: ndarray, contacts: ndarray) -> ndarray:
+        ...
+
+    def setup(self):
         ...
 
     def create_graph(self, contacts: ndarray, n_parts: int = 1):
