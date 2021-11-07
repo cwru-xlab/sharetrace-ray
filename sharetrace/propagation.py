@@ -1,28 +1,27 @@
 from collections import deque
-from datetime import timedelta
 from queue import Empty
 from timeit import default_timer
-from typing import Any, Hashable, Mapping, MutableMapping, NoReturn, Optional
+from typing import Any, Hashable, Mapping, NoReturn, Optional, Tuple
 
-from numpy import (argmax, array, clip, float_, inf, log, ndarray, timedelta64,
-                   void)
+from nptyping import NDArray
+from numpy import argmax, array, log, ndarray, sort, timedelta64, void
 
 from lewicki.lewicki.actors import ActorSystem, BaseActor
-from sharetrace.model import message
-from sharetrace.util import TimeDelta
+from sharetrace.model import Node, message
 
-_ACTOR_SYSTEM = 0
-_FACTOR = 1
-_VAR = 2
-_DAY = timedelta64(1, 'D')
-TWO_DAYS = timedelta64(172_800, 's')
+ACTOR_SYSTEM = -1
+FACTOR = 0
+DAY = timedelta64(1, 'D')
+
+
+def fkey(n1, n2) -> Tuple[Any, Any]:
+    return min(n1, n2), max(n1, n2)
 
 
 class Partition(BaseActor):
     __slots__ = (
         'graph',
         'nodes',
-        'group',
         'send_thresh',
         'time_buffer',
         'time_const',
@@ -36,49 +35,39 @@ class Partition(BaseActor):
 
     def __init__(
             self,
-            graph: Mapping[Hashable, Mapping],
-            nodes: MutableMapping[Hashable, ndarray],
-            group: int,
-            name: Optional[Hashable] = None,
+            graph: Mapping[Hashable, Node],
+            name: Hashable,
             send_thresh: float = 0.75,
-            time_buffer: TimeDelta = TWO_DAYS,
-            time_const: float = 1,
+            time_buffer: float = 1.728e5,
+            time_const: float = 1.,
             transmission: float = 0.8,
-            timeout: Optional[TimeDelta] = None,
-            max_dur: Optional[TimeDelta] = None,
-            early_stop: int = inf):
+            timeout: Optional[float] = None,
+            max_dur: Optional[float] = None,
+            early_stop: Optional[int] = None):
         super().__init__(name)
         # noinspection PyTypeChecker
-        self.outbox[group] = deque()
+        self.outbox[name] = deque()
         self.graph = graph
-        self.nodes = nodes
-        self.group = group
+        self.nodes = None
         self.send_thresh = send_thresh
-        self.time_buffer = timedelta64(time_buffer)
+        self.time_buffer = timedelta64(int(time_buffer * 1e6), 'us')
         self.time_const = time_const
         self.transmission = transmission
-        self.timeout = self._seconds(timeout)
-        self.max_dur = self._seconds(max_dur)
+        self.timeout = timeout
+        self.max_dur = max_dur
         self.early_stop = early_stop
         self._start = None
         self._since_update = 0
         self._timed_out = False
 
-    @staticmethod
-    def _seconds(delta: Optional[TimeDelta]) -> Optional[float]:
-        if isinstance(delta, timedelta64):
-            delta = float_(timedelta64(delta, 'us'))
-        elif isinstance(delta, timedelta):
-            delta = delta.microseconds
-        return delta / 1e6
-
     def run(self) -> NoReturn:
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
         self._start = default_timer()
+        self._on_initial(receive())
         while not stop():
             if (msg := receive()) is not None:
                 on_next(msg)
-        self.send(self.nodes, _ACTOR_SYSTEM)
+        self.send(self.nodes, ACTOR_SYSTEM)
 
     def should_stop(self) -> bool:
         too_long, no_updates = False, False
@@ -89,8 +78,8 @@ class Partition(BaseActor):
         return self._timed_out or too_long or no_updates
 
     # noinspection PyTypeChecker,PyUnresolvedReferences
-    def receive(self) -> Optional[void]:
-        if len((local := self.outbox[self.group])) > 0:
+    def receive(self) -> Optional[Any]:
+        if len((local := self.outbox[self.name])) > 0:
             msg = local.popleft()
         else:
             try:
@@ -100,44 +89,40 @@ class Partition(BaseActor):
         return msg
 
     def on_next(self, msg: void) -> NoReturn:
-        if msg['kind'] == _VAR:
-            self._on_variable_msg(msg)
-        else:
-            self._on_factor_msg(msg)
-
-    def _on_factor_msg(self, msg: void) -> NoReturn:
-        factor, var, vgroup, score = (
-            msg['src'], msg['dest'], msg['dgroup'], msg['val'])
-        graph, nodes, send = self.graph, self.nodes, self.send
-        if (val := score['val']) <= nodes[var]:
+        factor, var, score = msg['src'], msg['dest'], msg['val']
+        if (val := score['val']) > self.nodes[var]:
+            self._since_update, self.nodes[var] = 0, val
+            factors = self.graph[var]['ne']
+            self._send(array([score]), var, factors[factor != factors])
+        elif self.early_stop is not None:
             self._since_update += 1
-        else:
-            self._since_update, nodes[var] = 0, val
-            factors = graph[var]['ne']
-            scores = array([score])
-            for f in factors[factor != factors]:
-                send(message(scores, var, vgroup, f, graph[f]['group'], _VAR))
 
-    def _on_variable_msg(self, msg: void) -> NoReturn:
-        var, factor, fgroup, scores = (
-            msg['src'], msg['dest'], msg['dgroup'], msg['val'])
-        graph = self.graph
-        variables = graph[factor]['ne']
-        v_ne = variables[var != variables][0]
-        vgroup = graph[v_ne]['group']
-        recent = graph[factor]['data']['time']
-        times = scores['time']
-        scores = scores[times <= recent + self.time_buffer]
-        if len(scores) > 0:
-            diff = clip((times - recent) / _DAY, -inf, 0)
-            weight = diff / self.time_const
-            maximum = scores[argmax(log(scores['val']) + weight)]
-            maximum['val'] *= self.transmission
-            self.send(message(maximum, factor, fgroup, v_ne, vgroup, _FACTOR))
+    def _on_initial(self, scores: Mapping[Hashable, NDArray]) -> NoReturn:
+        self.nodes = {
+            var: sort(vscores, order=('val', 'time')[-1])['val']
+            for var, vscores in scores.items()}
+        graph, send = self.graph, self._send
+        for var, values in scores.items():
+            send(values, var, graph[var]['ne'])
+
+    def _send(self, scores: ndarray, var: Hashable, factors: ndarray):
+        graph, sgroup, send, time_buffer, time_const, transmission = (
+            self.graph, self.name, self.send, self.time_buffer,
+            self.time_const, self.transmission)
+        for f in factors:
+            recent = graph[fkey(var, f)]['data']['time']
+            scores = scores[scores['time'] <= recent + time_buffer]
+            if len(scores) > 0:
+                diff = (scores['time'] - recent) / DAY
+                weighted = log(scores['val']) + (diff / time_const)
+                maximum = scores[argmax(weighted)]
+                maximum['val'] *= transmission
+                dgroup = graph[f]['group']
+                send(message(maximum, var, sgroup, f, dgroup, FACTOR))
 
     def send(self, msg: Any, key: Hashable = None) -> NoReturn:
         key = key if key is not None else msg['dgroup']
-        if key == self.group:
+        if key == self.name:
             # noinspection PyUnresolvedReferences
             self.outbox[key].append(msg)
         else:
@@ -157,13 +142,13 @@ class RiskPropagation(ActorSystem):
     def __init__(
             self,
             send_thresh: float = 0.75,
-            time_buffer: int = 172_800,
-            time_const: float = 1,
+            time_buffer: float = 1.728e5,
+            time_const: float = 1.,
             transmission: float = 0.8,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None):
-        super().__init__(0)
+        super().__init__(ACTOR_SYSTEM)
         self.send_thresh = send_thresh
         self.time_buffer = time_buffer
         self.time_const = time_const
@@ -172,11 +157,11 @@ class RiskPropagation(ActorSystem):
         self.max_dur = max_dur
         self.early_stop = early_stop
 
-    def compute(self, scores: ndarray, contacts: ndarray) -> ndarray:
+    def compute(self, scores: NDArray, contacts: NDArray) -> NDArray:
         ...
 
     def setup(self):
         ...
 
-    def create_graph(self, contacts: ndarray, n_parts: int = 1):
+    def create_graph(self, contacts: NDArray, n_parts: int = 1):
         ...
