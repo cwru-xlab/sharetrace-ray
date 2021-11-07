@@ -1,17 +1,29 @@
-from typing import List, Tuple, Union, overload
+from typing import Tuple, Union, overload
 
-from numpy import (array, datetime64, float32, int32, int8, ndarray, sort,
-                   timedelta64, void)
+from nptyping import (Datetime64, Float32, Int32, Int8, NDArray, StructuredType,
+                      Timedelta64)
+from numpy import array, datetime64, float32, int32, int8, sort, timedelta64
 from pygeohash import decode, encode
 
 from sharetrace.util import DateTime, TimeDelta
 
-Coordinate = Tuple[float, float]
+RiskScore = NDArray[(), StructuredType[Float32, Datetime64]]
+Coordinate = Tuple[Float32, Float32]
+Coordinate_ = NDArray[(2,), Float32]
 Location = Union[str, Coordinate]
-ArrayLike = Union[ndarray, List, Tuple]
+TemporalLoc = NDArray[(), StructuredType[Union[str, Coordinate_], Datetime64]]
+CoordTemporalLoc = NDArray[(), StructuredType[Coordinate_, Datetime64]]
+GeohashTemporalLoc = NDArray[(), StructuredType[str, Datetime64]]
+Event = NDArray[(), StructuredType[Datetime64, Timedelta64]]
+Names = NDArray[(1,), str]
+Contact = NDArray[(), StructuredType[Names, Event]]
+History = NDArray[(), StructuredType[NDArray[(1,), TemporalLoc], Int32]]
+Message = NDArray[(), StructuredType[NDArray, Int32, Int8, Int32, Int8, Int8]]
+Neighbors = NDArray[(1,), Int32]
+Node = NDArray[(), StructuredType[Neighbors, Int8, NDArray]]
 
 
-def risk_score(val: float, time: DateTime) -> void:
+def risk_score(val: Float32, time: DateTime) -> RiskScore:
     """Creates a timestamped risk probability.
 
     Args:
@@ -27,14 +39,14 @@ def risk_score(val: float, time: DateTime) -> void:
 
 
 @overload
-def temporal_loc(loc: Coordinate, time: DateTime) -> void: ...
+def temporal_loc(loc: Coordinate, time: DateTime) -> CoordTemporalLoc: ...
 
 
 @overload
-def temporal_loc(loc: str, time: DateTime) -> void: ...
+def temporal_loc(loc: str, time: DateTime) -> GeohashTemporalLoc: ...
 
 
-def temporal_loc(loc: Location, time: DateTime) -> void:
+def temporal_loc(loc: Location, time: DateTime) -> TemporalLoc:
     """Creates a temporal location.
 
         Args:
@@ -52,18 +64,18 @@ def temporal_loc(loc: Location, time: DateTime) -> void:
     return array([(loc, time)], dtype=dt)[0]
 
 
-def to_geohash(coord: ndarray, prec: int = 12) -> void:
+def to_geohash(coord: CoordTemporalLoc, prec: int = 12) -> GeohashTemporalLoc:
     lat, long = coord['loc']
     geohash = encode(lat, long, prec)
     return temporal_loc(geohash, coord['time'])
 
 
-def to_coord(geohash: ndarray) -> void:
+def to_coord(geohash: GeohashTemporalLoc) -> CoordTemporalLoc:
     lat, long = decode(geohash['loc'])
     return temporal_loc((lat, long), geohash['time'])
 
 
-def event(time: DateTime, dur: TimeDelta) -> void:
+def event(time: DateTime, dur: TimeDelta) -> Event:
     """Creates a timestamped duration, where the timestamp indicates the start.
 
     Args:
@@ -78,7 +90,7 @@ def event(time: DateTime, dur: TimeDelta) -> void:
     return array([(time, dur)], dtype=dt)[0]
 
 
-def contact(names: ArrayLike, events: ArrayLike) -> void:
+def contact(names: Names, events: NDArray[(1,), Event]) -> Contact:
     """Creates a named set of events.
 
     Args:
@@ -98,7 +110,7 @@ def contact(names: ArrayLike, events: ArrayLike) -> void:
     return array([(names, time, dur)], dtype=dt)[0]
 
 
-def history(locs: ArrayLike, name: int) -> void:
+def history(locs: NDArray[(1,), TemporalLoc], name: Int32) -> History:
     """Creates a named and sorted location history.
 
     Args:
@@ -114,12 +126,12 @@ def history(locs: ArrayLike, name: int) -> void:
 
 
 def message(
-        val: ndarray,
-        src: int,
-        sgroup: int,
-        dest: int,
-        dgroup: int,
-        kind: int) -> void:
+        val: NDArray,
+        src: Int32,
+        sgroup: Int8,
+        dest: Int32,
+        dgroup: Int8,
+        kind: Int8) -> Message:
     """Creates a message used for passing information between objects.
 
     Args:
@@ -141,3 +153,13 @@ def message(
         ('dgroup', int8),
         ('kind', int8)]
     return array([(val, src, sgroup, dest, dgroup, kind)], dtype=dt)[0]
+
+
+def node(ne: Neighbors, group: Int8, data: NDArray) -> Node:
+    ne = array(ne)
+    data = array(data)
+    dt = [
+        ('ne', ne.dtype, ne.shape),
+        ('group', int8),
+        ('data', data.dtype, data.shape)]
+    return array([(ne, group, data)], dtype=dt)[0]
