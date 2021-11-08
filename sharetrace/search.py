@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from itertools import combinations
 from logging import getLogger
 from logging.config import dictConfig
-from typing import Iterable, List, NoReturn, Optional, Sequence, Tuple
+from typing import Iterable, NoReturn, Optional, Sequence, Tuple
 
 from joblib import Parallel, delayed
 from numpy import (
@@ -26,20 +26,20 @@ _EMPTY = ()
 ZERO = timedelta64(0, 's')
 
 dictConfig(LOGGING_CONFIG)
-logger = getLogger(__name__)
 
 
 class BaseContactSearch(ABC):
-    __slots__ = ('min_dur', 'workers')
+    __slots__ = ('min_dur', 'workers', '_logger')
 
     def __init__(self, min_dur: TimeDelta = ZERO, workers: int = 1, **kwargs):
         super().__init__()
         self.min_dur = timedelta64(min_dur)
         self.workers = workers
+        self._logger = getLogger(__name__)
         self._log_params(min_dur=self.min_dur, workers=workers, **kwargs)
 
     def _log_params(self, **kwargs):
-        logger.debug(
+        self._logger.debug(
             '%s parameters: %s',
             self.__class__.__name__,
             {str(k): str(v) for k, v in kwargs.items()})
@@ -61,17 +61,18 @@ class BruteContactSearch(BaseContactSearch):
 
     def search(self, histories: Histories) -> Contacts:
         timer = Timer.time(lambda: self._search(histories))
-        logger.info('%s: %.2f seconds', self.__class__.__name__, timer.seconds)
+        self._logger.info(
+            '%s: %.2f seconds', self.__class__.__name__, timer.seconds)
         return timer.result
 
     def _search(self, histories: Histories) -> Contacts:
-        logger.debug('Finding pairs to search...')
+        self._logger.debug('Finding pairs to search...')
         pairs = self.pairs(histories)
-        logger.debug('Initiating contact search...')
+        self._logger.debug('Initiating contact search...')
         par = Parallel(n_jobs=self.workers)
         contacts = par(delayed(self._find_contact)(*p) for p in pairs)
         contacts = array([c for c in contacts if c is not None])
-        logger.debug('Contact search completed')
+        self._logger.debug('Contact search completed')
         return contacts
 
     def pairs(self, histories: Histories) -> Pairs:
@@ -92,7 +93,7 @@ class BruteContactSearch(BaseContactSearch):
             i1: int,
             locs2: ndarray,
             i2: int
-    ) -> List[ndarray]:
+    ) -> Sequence[ndarray]:
         events = []
         later, create_event, find, add_events = (
             self._later, self._event, self._find, events.extend)
@@ -157,13 +158,13 @@ class TreeContactSearch(BruteContactSearch):
         self.leaf_size = leaf_size
 
     def pairs(self, histories: Histories) -> Pairs:
-        logger.debug('Mapping location histories to coordinates...')
+        self._logger.debug('Mapping location histories to coordinates...')
         locs = self.to_coordinates(histories)
-        logger.debug('Indexing coordinates to map back to users...')
+        self._logger.debug('Indexing coordinates to map back to users...')
         idx = self.index(locs)
-        logger.debug('Querying pairs using spatial indexing...')
+        self._logger.debug('Querying pairs using spatial indexing...')
         pairs = self.query_pairs(concatenate(locs))
-        logger.debug('Filtering histories based on queried pairs...')
+        self._logger.debug('Filtering histories based on queried pairs...')
         return self.filter(pairs, idx, histories)
 
     def to_coordinates(self, hists: Histories) -> Histories:
@@ -191,7 +192,7 @@ class TreeContactSearch(BruteContactSearch):
     def _log_stats(self, hists: int, pairs: int) -> NoReturn:
         combos = hists ** 2
         dec = self._percent_decrease(combos, pairs)
-        logger.info(
+        self._logger.info(
             'Pairs (tree / brute): %d / %d (%.2f percent)', pairs, combos, dec)
 
     @staticmethod
@@ -212,9 +213,9 @@ class BallTreeContactSearch(TreeContactSearch):
         super().__init__(min_dur, workers, r, leaf_size, **kwargs)
 
     def query_pairs(self, locs: ndarray) -> ndarray:
-        logger.debug('Constructing a ball tree spatial index')
+        self._logger.debug('Constructing a ball tree spatial index')
         ball_tree = BallTree(locs, self.leaf_size, 'haversine')
-        logger.debug('Querying for pairs')
+        self._logger.debug('Querying for pairs')
         points = ball_tree.query_radius(locs, self.r)
         idx = self.index(points)
         points = concatenate(points)
@@ -240,9 +241,9 @@ class KdTreeContactSearch(TreeContactSearch):
 
     def query_pairs(self, locs: ndarray) -> ndarray:
         locs = self._project(locs)
-        logger.debug('Constructing a k-d tree spatial index')
+        self._logger.debug('Constructing a k-d tree spatial index')
         kd_tree = KDTree(locs, self.leaf_size)
-        logger.debug('Querying for pairs')
+        self._logger.debug('Querying for pairs')
         return kd_tree.query_pairs(self.r, self.p, self.eps, 'ndarray')
 
     @staticmethod

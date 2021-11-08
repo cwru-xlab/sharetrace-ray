@@ -3,11 +3,10 @@ from queue import Empty
 from timeit import default_timer
 from typing import Any, Hashable, Mapping, NoReturn, Optional, Tuple
 
-from nptyping import NDArray
 from numpy import argmax, array, log, ndarray, sort, timedelta64, void
 
 from lewicki.lewicki.actors import ActorSystem, BaseActor
-from sharetrace.model import Node, message
+from sharetrace.model import message
 
 ACTOR_SYSTEM = -1
 FACTOR = 0
@@ -35,7 +34,7 @@ class Partition(BaseActor):
 
     def __init__(
             self,
-            graph: Mapping[Hashable, Node],
+            graph: Mapping[Hashable, ndarray],
             name: Hashable,
             send_thresh: float = 0.75,
             time_buffer: float = 1.728e5,
@@ -97,7 +96,7 @@ class Partition(BaseActor):
         elif self.early_stop is not None:
             self._since_update += 1
 
-    def _on_initial(self, scores: Mapping[Hashable, NDArray]) -> NoReturn:
+    def _on_initial(self, scores: Mapping[Hashable, ndarray]) -> NoReturn:
         self.nodes = {
             var: sort(vscores, order=('val', 'time')[-1])['val']
             for var, vscores in scores.items()}
@@ -157,11 +156,11 @@ class RiskPropagation(ActorSystem):
         self.max_dur = max_dur
         self.early_stop = early_stop
 
-    def compute(self, scores: NDArray, contacts: NDArray) -> NDArray:
+    def compute(self, scores: ndarray, contacts: ndarray) -> ndarray:
         ...
 
     def setup(self):
         ...
 
-    def create_graph(self, contacts: NDArray, n_parts: int = 1):
+    def create_graph(self, contacts: ndarray, n_parts: int = 1):
         ...

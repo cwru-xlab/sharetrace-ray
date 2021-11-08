@@ -5,4 +5,3 @@ scipy~=1.7.1
 scikit-learn~=1.0.1
 pygeohash~=1.2.0
 pyproj~=3.2.1
-nptyping~=1.4.4

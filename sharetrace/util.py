@@ -6,10 +6,10 @@ from datetime import datetime, timedelta
 from timeit import default_timer
 from typing import Any, Callable, Union
 
-from nptyping import Datetime64, Timedelta64
+from numpy import datetime64, timedelta64
 
-TimeDelta = Union[timedelta, Timedelta64]
-DateTime = Union[datetime, Datetime64]
+TimeDelta = Union[timedelta, timedelta64]
+DateTime = Union[datetime, datetime64]
 
 LOGGING_CONFIG = {
     'version': 1,

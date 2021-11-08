@@ -1,29 +1,17 @@
-from typing import Tuple, Union, overload
+from typing import Iterable, Tuple, Union, overload
 
-from nptyping import (Datetime64, Float32, Int32, Int8, NDArray, StructuredType,
-                      Timedelta64)
-from numpy import array, datetime64, float32, int32, int8, sort, timedelta64
+from numpy import (array, datetime64, float32, int32, int8, ndarray, sort,
+                   timedelta64, void)
 from pygeohash import decode, encode
 
 from sharetrace.util import DateTime, TimeDelta
 
-RiskScore = NDArray[(), StructuredType[Float32, Datetime64]]
-Coordinate = Tuple[Float32, Float32]
-Coordinate_ = NDArray[(2,), Float32]
+ArrayLike = Union[Iterable, ndarray]
+Coordinate = Tuple[float, float]
 Location = Union[str, Coordinate]
-TemporalLoc = NDArray[(), StructuredType[Union[str, Coordinate_], Datetime64]]
-CoordTemporalLoc = NDArray[(), StructuredType[Coordinate_, Datetime64]]
-GeohashTemporalLoc = NDArray[(), StructuredType[str, Datetime64]]
-Event = NDArray[(), StructuredType[Datetime64, Timedelta64]]
-Names = NDArray[(1,), str]
-Contact = NDArray[(), StructuredType[Names, Event]]
-History = NDArray[(), StructuredType[NDArray[(1,), TemporalLoc], Int32]]
-Message = NDArray[(), StructuredType[NDArray, Int32, Int8, Int32, Int8, Int8]]
-Neighbors = NDArray[(1,), Int32]
-Node = NDArray[(), StructuredType[Neighbors, Int8, NDArray]]
 
 
-def risk_score(val: Float32, time: DateTime) -> RiskScore:
+def risk_score(val: float, time: DateTime) -> void:
     """Creates a timestamped risk probability.
 
     Args:
@@ -39,14 +27,14 @@ def risk_score(val: Float32, time: DateTime) -> RiskScore:
 
 
 @overload
-def temporal_loc(loc: Coordinate, time: DateTime) -> CoordTemporalLoc: ...
+def temporal_loc(loc: Coordinate, time: DateTime) -> void: ...
 
 
 @overload
-def temporal_loc(loc: str, time: DateTime) -> GeohashTemporalLoc: ...
+def temporal_loc(loc: str, time: DateTime) -> void: ...
 
 
-def temporal_loc(loc: Location, time: DateTime) -> TemporalLoc:
+def temporal_loc(loc: Location, time: DateTime) -> void:
     """Creates a temporal location.
 
         Args:
@@ -64,33 +52,33 @@ def temporal_loc(loc: Location, time: DateTime) -> TemporalLoc:
     return array([(loc, time)], dtype=dt)[0]
 
 
-def to_geohash(coord: CoordTemporalLoc, prec: int = 12) -> GeohashTemporalLoc:
+def to_geohash(coord: void, prec: int = 12) -> void:
     lat, long = coord['loc']
     geohash = encode(lat, long, prec)
     return temporal_loc(geohash, coord['time'])
 
 
-def to_coord(geohash: GeohashTemporalLoc) -> CoordTemporalLoc:
+def to_coord(geohash: void) -> void:
     lat, long = decode(geohash['loc'])
     return temporal_loc((lat, long), geohash['time'])
 
 
-def event(time: DateTime, dur: TimeDelta) -> Event:
+def event(time: DateTime, delta: TimeDelta) -> void:
     """Creates a timestamped duration, where the timestamp indicates the start.
 
     Args:
         time: A datetime datetime or numpy datetime64.
-        dur: A datetime timedelta or numpy timedelta64
+        delta: A datetime timedelta or numpy timedelta64
 
     Returns:
         A structured array with attributes 'time' and 'delta'.
     """
-    time, dur = datetime64(time), timedelta64(dur)
-    dt = [('time', time.dtype), ('delta', dur.dtype)]
-    return array([(time, dur)], dtype=dt)[0]
+    time, delta = datetime64(time), timedelta64(delta)
+    dt = [('time', time.dtype), ('delta', delta.dtype)]
+    return array([(time, delta)], dtype=dt)[0]
 
 
-def contact(names: Names, events: NDArray[(1,), Event]) -> Contact:
+def contact(names: ArrayLike, events: ArrayLike) -> void:
     """Creates a named set of events.
 
     Args:
@@ -102,15 +90,15 @@ def contact(names: Names, events: NDArray[(1,), Event]) -> Contact:
     """
     names, events = array(names), array(events)
     most_recent = sort(events, order=('time', 'delta'), kind='stable')[-1]
-    time, dur = most_recent['time'], most_recent['delta']
+    time, delta = most_recent['time'], most_recent['delta']
     dt = [
         ('names', names.dtype, names.shape),
         ('time', time.dtype),
-        ('delta', dur.dtype)]
-    return array([(names, time, dur)], dtype=dt)[0]
+        ('delta', delta.dtype)]
+    return array([(names, time, delta)], dtype=dt)[0]
 
 
-def history(locs: NDArray[(1,), TemporalLoc], name: Int32) -> History:
+def history(locs: ArrayLike, name: int) -> void:
     """Creates a named and sorted location history.
 
     Args:
@@ -126,12 +114,12 @@ def history(locs: NDArray[(1,), TemporalLoc], name: Int32) -> History:
 
 
 def message(
-        val: NDArray,
-        src: Int32,
-        sgroup: Int8,
-        dest: Int32,
-        dgroup: Int8,
-        kind: Int8) -> Message:
+        val: ndarray,
+        src: int,
+        sgroup: int,
+        dest: int,
+        dgroup: int,
+        kind: int) -> void:
     """Creates a message used for passing information between objects.
 
     Args:
@@ -155,7 +143,16 @@ def message(
     return array([(val, src, sgroup, dest, dgroup, kind)], dtype=dt)[0]
 
 
-def node(ne: Neighbors, group: Int8, data: NDArray) -> Node:
+def node(ne: ArrayLike, group: int, data: ArrayLike) -> void:
+    """Creates a graph node.
+    Args:
+        ne: An iterable of neighbor identifiers.
+        group: An 8-bit int that indicates which the graph partition.
+        data: An iterable that represents static node data.
+
+    Returns:
+        A numpy structured array with attributes ne, group, and data.
+    """
     ne = array(ne)
     data = array(data)
     dt = [
