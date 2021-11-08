@@ -7,9 +7,10 @@ import joblib
 import numpy as np
 from scipy import stats
 
-from sharetrace import logging_config, model, search
+import sharetrace.util
+from sharetrace import model, search
 
-logging.config.dictConfig(logging_config.config)
+logging.config.dictConfig(sharetrace.util.LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
 NOW = np.datetime64(datetime.datetime.utcnow(), 's')
