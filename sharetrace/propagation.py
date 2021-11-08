@@ -96,7 +96,7 @@ class Partition(BaseActor):
         elif self.early_stop is not None:
             self._since_update += 1
 
-    def _on_initial(self, scores: Mapping[Hashable, ndarray]) -> NoReturn:
+    def _on_initial(self, scores: Mapping[int, ndarray]) -> NoReturn:
         self.nodes = {
             var: sort(vscores, order=('val', 'time')[-1])['val']
             for var, vscores in scores.items()}
@@ -104,7 +104,7 @@ class Partition(BaseActor):
         for var, values in scores.items():
             send(values, var, graph[var]['ne'])
 
-    def _send(self, scores: ndarray, var: Hashable, factors: ndarray):
+    def _send(self, scores: ndarray, var: int, factors: ndarray):
         graph, sgroup, send, time_buffer, time_const, transmission = (
             self.graph, self.name, self.send, self.time_buffer,
             self.time_const, self.transmission)
