@@ -143,20 +143,16 @@ def message(
     return array([(val, src, sgroup, dest, dgroup, kind)], dtype=dt)[0]
 
 
-def node(ne: ArrayLike, group: int, data: ArrayLike) -> void:
+def node(ne: ArrayLike, group: int) -> void:
     """Creates a graph node.
+
     Args:
         ne: An iterable of neighbor identifiers.
         group: An 8-bit int that indicates which the graph partition.
-        data: An iterable that represents static node data.
 
     Returns:
-        A numpy structured array with attributes ne, group, and data.
+        A numpy structured array with attributes ne and group.
     """
     ne = array(ne)
-    data = array(data)
-    dt = [
-        ('ne', ne.dtype, ne.shape),
-        ('group', int8),
-        ('data', data.dtype, data.shape)]
-    return array([(ne, group, data)], dtype=dt)[0]
+    dt = [('ne', ne.dtype, ne.shape), ('group', int8)]
+    return array([(ne, group)], dtype=dt)[0]
