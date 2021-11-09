@@ -118,8 +118,7 @@ def message(
         src: int,
         sgroup: int,
         dest: int,
-        dgroup: int,
-        kind: int) -> void:
+        dgroup: int) -> void:
     """Creates a message used for passing information between objects.
 
     Args:
@@ -128,19 +127,17 @@ def message(
         sgroup: An 8-bit int that represents the group of the source.
         dest: A 32-bit int that represents the destination of the message.
         dgroup: An 8-bit int that represents the group of the destination.
-        kind: An 8-bit int that represents the type of message.
 
     Returns:
-       An array with attributes val, src, sgroup, dest, dgroup, and kind.
+       An array with attributes val, src, sgroup, dest, and dgroup.
     """
     dt = [
         ('val', val.dtype, val.shape),
         ('src', int32),
         ('sgroup', int8),
         ('dest', int32),
-        ('dgroup', int8),
-        ('kind', int8)]
-    return array([(val, src, sgroup, dest, dgroup, kind)], dtype=dt)[0]
+        ('dgroup', int8)]
+    return array([(val, src, sgroup, dest, dgroup)], dtype=dt)[0]
 
 
 def node(ne: ArrayLike, group: int) -> void:

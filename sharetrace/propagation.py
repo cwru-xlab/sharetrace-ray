@@ -5,7 +5,8 @@ from logging.config import dictConfig
 from queue import Empty
 from timeit import default_timer
 from typing import (
-    Any, Hashable, Iterable, Mapping, NoReturn, Optional, Sequence, Tuple
+    Any, Hashable, Iterable, Mapping, MutableMapping, NoReturn, Optional,
+    Sequence, Tuple
 )
 
 from numpy import (
@@ -20,10 +21,10 @@ from sharetrace.util import LOGGING_CONFIG, Timer
 NpSeq = Sequence[ndarray]
 NpMap = Mapping[int, ndarray]
 Graph = Mapping[Hashable, Any]
-Nodes = Mapping[Hashable, void]
+MutableGraph = MutableMapping[Hashable, Any]
+Nodes = Mapping[int, void]
 
 ACTOR_SYSTEM = -1
-FACTOR = 0
 DAY = timedelta64(1, 'D')
 EMPTY = ()
 
@@ -136,7 +137,7 @@ class Partition(BaseActor):
         factors = self.graph[var]['ne']
         self._send(array([score]), var, factors[factor != factors])
 
-    def _update(self, var: Hashable, score: void) -> NoReturn:
+    def _update(self, var: int, score: void) -> NoReturn:
         """Update the exposure score of the current variable node."""
         updated = False
         if (new := score['val']) > self._nodes[var]['val']:
@@ -179,10 +180,9 @@ class Partition(BaseActor):
                 score['val'] *= transmission
                 # Only send if the message score has a higher value or time.
                 if score['time'] > curr['time'] or score['val'] > curr['val']:
-                    dgroup = graph[f]['group']
-                    send(message(score, var, sgroup, f, dgroup, FACTOR))
+                    send(message(score, var, sgroup, f, graph[f]['group']))
 
-    def send(self, msg: Any, key: Hashable = None) -> NoReturn:
+    def send(self, msg: Any, key: int = None) -> NoReturn:
         """Send a message either to the local inbox or an outbox."""
         # msg must be a message structured array if key is None
         key = key if key is not None else msg['dgroup']
@@ -263,7 +263,8 @@ class RiskPropagation(ActorSystem):
             self.outbox[p].put(pnodes, block=True)
 
     def _create_graph(self, contacts: NpSeq) -> Tuple[Graph, ndarray]:
-        graph, adj = {}, defaultdict(list)
+        graph: MutableGraph = {}
+        adj = defaultdict(list)
         # Assumes a name corresponds to an index in scores.
         for contact in contacts:
             n1, n2 = contact['names']
@@ -272,11 +273,10 @@ class RiskPropagation(ActorSystem):
             graph[fkey(n1, n2)] = contact['time']
         # Keep indexing consistent in case of users that have no contacts.
         adj = [unique(adj.get(n, EMPTY)) for n in range(self._scores)]
-        membership = self._partition(adj)
-        # noinspection PyTypeChecker
+        membership = self.partition(adj)
         graph.update((n, node(ne, membership[n])) for n, ne in enumerate(adj))
         return graph, membership
 
-    def _partition(self, adj: NpSeq) -> ndarray:
+    def partition(self, adj: NpSeq) -> ndarray:
         cuts, membership = part_graph(self.parts, adj)
         return membership
