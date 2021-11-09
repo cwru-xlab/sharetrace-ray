@@ -65,13 +65,12 @@ class BruteContactSearch(BaseContactSearch):
         return timer.result
 
     def _search(self, histories: Histories) -> Contacts:
-        self._logger.debug('Finding pairs to search...')
+        self._logger.info('Initiating contact search...')
         pairs = self.pairs(histories)
-        self._logger.debug('Initiating contact search...')
         par = Parallel(n_jobs=self.workers)
         contacts = par(delayed(self._find_contact)(*p) for p in pairs)
         contacts = array([c for c in contacts if c is not None])
-        self._logger.debug('Contact search completed')
+        self._logger.info('Contacts found: %d', len(contacts))
         return contacts
 
     def pairs(self, histories: Histories) -> Pairs:
