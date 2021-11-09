@@ -152,17 +152,17 @@ class Partition(BaseActor):
         # Must be a mapping since indices may neither start at 0 nor be
         # contiguous, based on the original input scores.
         nodes = {}
-        for n, nscores in scores.items():
-            init = sort(nscores, order=('val', 'time'))[-1]
-            nodes[n] = {
+        for var, vscores in scores.items():
+            init = sort(vscores, order=('val', 'time'))[-1]
+            nodes[var] = {
                 'init': init,
                 'curr': init['val'],
                 'prev': defaultdict(lambda: DEFAULT_SCORE)}
         self._nodes = nodes
         graph, send = self.graph, self._send
         # Send initial symptom score messages to all neighbors.
-        for n, nscores in scores.items():
-            send(nscores, n, graph[n]['ne'])
+        for var, vscores in scores.items():
+            send(vscores, var, graph[var]['ne'])
 
     def _send(self, scores: ndarray, var: int, factors: ndarray):
         """Compute a factor node message and send if it will be effective."""
@@ -267,8 +267,8 @@ class RiskPropagation(ActorSystem):
 
     def _group(self, scores: NpSeq, idx: Iterable[int]) -> Sequence[NpMap]:
         groups = [dict() for _ in range(self.parts)]
-        for n, (g, nscores) in enumerate(zip(idx, scores)):
-            groups[g][n] = nscores
+        for var, (g, vscores) in enumerate(zip(idx, scores)):
+            groups[g][var] = vscores
         return groups
 
     def send(self, *nodes: NpSeq) -> NoReturn:
