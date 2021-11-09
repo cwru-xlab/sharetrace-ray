@@ -88,7 +88,7 @@ class Partition(BaseActor):
         self._logger.info(
             'Partition %d - messages processed: %d',
             self.name, self._total_msgs)
-        results = {n: data['curr']['val'] for n, data in self._nodes.items()}
+        results = {n: data['curr'] for n, data in self._nodes.items()}
         # Must send the results of the child process via queue.
         self.send(results, ACTOR_SYSTEM)
 
@@ -141,14 +141,9 @@ class Partition(BaseActor):
 
     def _update(self, var: int, score: void) -> NoReturn:
         """Update the exposure score of the current variable node."""
-        updated, data = False, self._nodes[var]
-        if (new := score['val']) > data['curr']['val']:
-            self._since_update, data['curr']['val'] = 0, new
-            updated = True
-        if (new := score['time']) > data['curr']['time']:
-            self._since_update, data['curr']['time'] = 0, new
-            updated = True
-        if self.early_stop is not None and not updated:
+        if (new := score['val']) > (data := self._nodes[var])['curr']:
+            self._since_update, data['curr'] = 0, new
+        elif self.early_stop is not None:
             self._since_update += 1
 
     def _on_initial(self, scores: NpMap) -> NoReturn:
@@ -161,7 +156,7 @@ class Partition(BaseActor):
             init = sort(nscores, order=('val', 'time'))[-1]
             nodes[n] = {
                 'init': init,
-                'curr': init,
+                'curr': init['val'],
                 'prev': defaultdict(lambda: DEFAULT_SCORE)}
         self._nodes = nodes
         graph, send = self.graph, self._send
@@ -186,9 +181,16 @@ class Partition(BaseActor):
                 weighted = log(scores['val']) + (diff / const)
                 score = scores[argmax(weighted)]
                 score['val'] *= transmission
+                # Always send if the value is higher as it will always result
+                # in an update to the neighbor value, but may not result in
+                # them propagating the message, depending on the time.
                 higher = score['val'] > prev[f]['val']
+                # If the score is newer and is at least as high as what was
+                # initially sent, then send the message. This will not result
+                # in an update to the neighbor value, but may result in
+                # propagating the message, depending on the value and time.
                 newer = score['time'] > prev[f]['time']
-                high_enough = score['val'] > init['val']
+                high_enough = score['val'] >= init['val']
                 if higher or (newer and high_enough):
                     send(message(score, var, sgroup, f, graph[f]['group']))
                     prev[f] = score
