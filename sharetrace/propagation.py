@@ -1,3 +1,4 @@
+import datetime
 from collections import defaultdict, deque
 from functools import reduce
 from logging import getLogger
@@ -15,7 +16,7 @@ from numpy import (
 from pymetis import part_graph
 
 from lewicki.actors import ActorSystem, BaseActor
-from sharetrace.model import message, node
+from sharetrace.model import message, node, risk_score
 from sharetrace.util import LOGGING_CONFIG, Timer
 
 NpSeq = Sequence[ndarray]
@@ -27,6 +28,7 @@ Nodes = Mapping[int, void]
 ACTOR_SYSTEM = -1
 DAY = timedelta64(1, 'D')
 EMPTY = ()
+DEFAULT_SCORE = risk_score(0, datetime.datetime.min)
 
 dictConfig(LOGGING_CONFIG)
 
@@ -84,9 +86,9 @@ class Partition(BaseActor):
         self._logger.info(
             'Partition %d - runtime: %.2f seconds', self.name, timed.seconds)
         self._logger.info(
-            'Partition %d - total messages processed: %d',
+            'Partition %d - messages processed: %d',
             self.name, self._total_msgs)
-        results = {n: data['val'] for n, data in self._nodes.items()}
+        results = {n: data['curr']['val'] for n, data in self._nodes.items()}
         # Must send the results of the child process via queue.
         self.send(results, ACTOR_SYSTEM)
 
@@ -112,8 +114,8 @@ class Partition(BaseActor):
                     self.name, self.early_stop)
         if self._timed_out:
             self._logger.info(
-                'Partition %d - timed out after %.2f seconds.',
-                self.name, self._timed_out)
+                'Partition %d - timed out after %.2f seconds',
+                self.name, self.timeout)
         return self._timed_out or too_long or no_updates
 
     def receive(self) -> Optional[Any]:
@@ -139,24 +141,29 @@ class Partition(BaseActor):
 
     def _update(self, var: int, score: void) -> NoReturn:
         """Update the exposure score of the current variable node."""
-        updated = False
-        if (new := score['val']) > self._nodes[var]['val']:
-            self._since_update, self._nodes[var]['val'] = 0, new
+        updated, data = False, self._nodes[var]
+        if (new := score['val']) > data['curr']['val']:
+            self._since_update, data['curr']['val'] = 0, new
             updated = True
-        if (new := score['time']) > self._nodes[var]['time']:
-            self._since_update, self._nodes[var]['time'] = 0, new
+        if (new := score['time']) > data['curr']['time']:
+            self._since_update, data['curr']['time'] = 0, new
             updated = True
         if self.early_stop is not None and not updated:
             self._since_update += 1
 
     def _on_initial(self, scores: NpMap) -> NoReturn:
         self._logger.info(
-            'Partition %d - number of nodes: %d', self.name, len(scores))
+            'Partition %d - nodes: %d', self.name, len(scores))
         # Must be a mapping since indices may neither start at 0 nor be
         # contiguous, based on the original input scores.
-        self._nodes = {
-            n: sort(nscores, order=('val', 'time'))[-1]
-            for n, nscores in scores.items()}
+        nodes = {}
+        for n, nscores in scores.items():
+            init = sort(nscores, order=('val', 'time'))[-1]
+            nodes[n] = {
+                'init': init,
+                'curr': init,
+                'prev': defaultdict(lambda: DEFAULT_SCORE)}
+        self._nodes = nodes
         graph, send = self.graph, self._send
         # Send initial symptom score messages to all neighbors.
         for n, nscores in scores.items():
@@ -164,23 +171,27 @@ class Partition(BaseActor):
 
     def _send(self, scores: ndarray, var: int, factors: ndarray):
         """Compute a factor node message and send if it will be effective."""
-        graph, curr, sgroup, send, time_buffer, time_const, transmission = (
-            self.graph, self._nodes[var], self.name, self.send,
-            self.time_buffer, self.time_const, self.transmission)
+        graph, init, prev, sgroup, send, buffer, const, transmission = (
+            self.graph, self._nodes[var]['init'], self._nodes[var]['prev'],
+            self.name, self.send, self.time_buffer, self.time_const,
+            self.transmission)
         for f in factors:
             # Only consider scores that may have been transmitted from contact.
             recent = graph[fkey(var, f)]
-            scores = scores[scores['time'] <= recent + time_buffer]
+            scores = scores[scores['time'] <= recent + buffer]
             if len(scores) > 0:
                 # Scales time deltas in partial days.
                 diff = (scores['time'] - recent) / DAY
                 # Use the log transform to avoid overflow issues.
-                weighted = log(scores['val']) + (diff / time_const)
+                weighted = log(scores['val']) + (diff / const)
                 score = scores[argmax(weighted)]
                 score['val'] *= transmission
-                # Only send if the message score has a higher value or time.
-                if score['time'] > curr['time'] or score['val'] > curr['val']:
+                higher = score['val'] > prev[f]['val']
+                newer = score['time'] > prev[f]['time']
+                high_enough = score['val'] > init['val']
+                if higher or (newer and high_enough):
                     send(message(score, var, sgroup, f, graph[f]['group']))
+                    prev[f] = score
 
     def send(self, msg: Any, key: int = None) -> NoReturn:
         """Send a message either to the local inbox or an outbox."""
