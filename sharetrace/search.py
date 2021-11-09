@@ -7,7 +7,7 @@ from typing import Iterable, NoReturn, Optional, Sequence, Tuple
 from joblib import Parallel, delayed
 from numpy import (
     arange, array, column_stack, concatenate, ndarray, repeat, sort,
-    timedelta64, unique, vstack
+    timedelta64, unique, void, vstack
 )
 from numpy.random import default_rng
 from pyproj import Proj, Transformer
@@ -17,9 +17,9 @@ from sklearn.neighbors import BallTree
 from sharetrace.model import contact, event, to_coord
 from sharetrace.util import LOGGING_CONFIG, Timer
 
-Locations = Histories = Sequence[ndarray]
+Locations = Histories = Sequence[void]
 Contacts = ndarray
-Pairs = Iterable[Tuple[ndarray, ndarray]]
+Pairs = Iterable[Tuple[void, void]]
 
 _rng = default_rng()
 _EMPTY = ()
@@ -76,7 +76,7 @@ class BruteContactSearch(BaseContactSearch):
     def pairs(self, histories: Histories) -> Pairs:
         return combinations(histories, 2)
 
-    def _find_contact(self, h1: ndarray, h2: ndarray) -> Optional[ndarray]:
+    def _find_contact(self, h1: void, h2: void) -> Optional[ndarray]:
         found = None
         name1, name2 = h1['name'], h2['name']
         if name1 != name2:
@@ -124,18 +124,18 @@ class BruteContactSearch(BaseContactSearch):
             add_events(create_event(start, loc1, loc2))
         return events
 
-    def _event(self, start, loc1: ndarray, loc2: ndarray) -> Iterable[ndarray]:
+    def _event(self, start, loc1: void, loc2: void) -> Iterable[ndarray]:
         end = self._earlier(loc1, loc2)
         dur = end - start
         return [event(start, dur)] if dur >= self.min_dur else _EMPTY
 
     @staticmethod
-    def _later(loc1: ndarray, loc2: ndarray) -> float:
+    def _later(loc1: void, loc2: void) -> float:
         t1, t2 = loc1['time'], loc2['time']
         return t1 if t1 > t2 else t2
 
     @staticmethod
-    def _earlier(loc1: ndarray, loc2: ndarray) -> float:
+    def _earlier(loc1: void, loc2: void) -> float:
         t1, t2 = loc1['time'], loc2['time']
         return t1 if t1 < t2 else t2
 
