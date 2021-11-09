@@ -8,7 +8,6 @@ from sharetrace.util import DateTime, TimeDelta
 
 ArrayLike = Union[Iterable, ndarray]
 Coordinate = Tuple[float, float]
-Location = Union[str, Coordinate]
 
 
 def risk_score(val: float, time: DateTime) -> void:
@@ -34,7 +33,7 @@ def temporal_loc(loc: Coordinate, time: DateTime) -> void: ...
 def temporal_loc(loc: str, time: DateTime) -> void: ...
 
 
-def temporal_loc(loc: Location, time: DateTime) -> void:
+def temporal_loc(loc: Union[str, Coordinate], time: DateTime) -> void:
     """Creates a temporal location.
 
         Args:
