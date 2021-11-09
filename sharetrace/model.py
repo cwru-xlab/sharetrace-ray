@@ -148,7 +148,7 @@ def node(ne: ArrayLike, group: int) -> void:
 
     Args:
         ne: An iterable of neighbor identifiers.
-        group: An 8-bit int that indicates which the graph partition.
+        group: An 8-bit int that indicates the graph partition.
 
     Returns:
         A numpy structured array with attributes ne and group.

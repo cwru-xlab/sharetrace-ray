@@ -1,6 +1,7 @@
-import datetime
 from collections import defaultdict, deque
 from functools import reduce
+from logging import getLogger
+from logging.config import dictConfig
 from queue import Empty
 from timeit import default_timer
 from typing import (
@@ -12,17 +13,21 @@ from numpy import (
 )
 from pymetis import part_graph
 
-from lewicki.lewicki.actors import ActorSystem, BaseActor
-from sharetrace.model import message, node, risk_score
+from lewicki.actors import ActorSystem, BaseActor
+from sharetrace.model import message, node
+from sharetrace.util import LOGGING_CONFIG, Timer
 
 NpSeq = Sequence[ndarray]
+NpMap = Mapping[int, ndarray]
 Graph = Mapping[Hashable, Any]
+Nodes = Mapping[Hashable, void]
 
 ACTOR_SYSTEM = -1
 FACTOR = 0
 DAY = timedelta64(1, 'D')
 EMPTY = ()
-DEFAULT_SCORE = risk_score(0, datetime.datetime.min)
+
+dictConfig(LOGGING_CONFIG)
 
 
 def fkey(n1, n2) -> Tuple[Any, Any]:
@@ -32,125 +37,163 @@ def fkey(n1, n2) -> Tuple[Any, Any]:
 class Partition(BaseActor):
     __slots__ = (
         'graph',
-        'send_thresh',
         'time_buffer',
         'time_const',
         'transmission',
         'timeout',
         'max_dur',
         'early_stop',
+        '_local',
         '_nodes',
         '_start',
         '_since_update',
-        '_timed_out')
+        '_timed_out',
+        '_total_msgs',
+        '_logger')
 
     def __init__(
             self,
-            graph: Graph,
             name: Hashable,
-            send_thresh: float = 0.75,
-            time_buffer: float = 1.728e5,
-            time_const: float = 1.,
-            transmission: float = 0.8,
-            timeout: Optional[float] = None,
-            max_dur: Optional[float] = None,
-            early_stop: Optional[int] = None):
+            graph: Graph,
+            time_buffer: int,
+            time_const: float,
+            transmission: float,
+            timeout: Optional[float],
+            max_dur: Optional[float],
+            early_stop: Optional[int]):
         super().__init__(name)
-        # noinspection PyTypeChecker
-        self.outbox[name] = deque()
         self.graph = graph
-        self.send_thresh = send_thresh
-        self.time_buffer = timedelta64(int(time_buffer * 1e6), 'us')
+        self.time_buffer = timedelta64(time_buffer, 's')
         self.time_const = time_const
         self.transmission = transmission
         self.timeout = timeout
         self.max_dur = max_dur
         self.early_stop = early_stop
-        self._nodes: Mapping[int, Mapping] = {}
+        self._local = deque()
+        self._nodes: Nodes = {}
         self._start: int = -1
         self._since_update: int = 0
         self._timed_out: bool = False
+        self._total_msgs = 0
+        self._logger = getLogger(__name__)
 
     def run(self) -> NoReturn:
+        self._logger.info('Partition %d - initializing...', self.name)
+        timed = Timer.time(self._run)
+        self._logger.info(
+            'Partition %d - runtime: %.2f seconds', self.name, timed.seconds)
+        self._logger.info(
+            'Partition %d - total messages processed: %d',
+            self.name, self._total_msgs)
+        results = {n: data['val'] for n, data in self._nodes.items()}
+        # Must send the results of the child process via queue.
+        self.send(results, ACTOR_SYSTEM)
+
+    def _run(self):
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
         self._start = default_timer()
         self._on_initial(receive())
         while not stop():
             if (msg := receive()) is not None:
                 on_next(msg)
-        results = {n: data['val'] for n, data in self._nodes.items()}
-        self.send(results, ACTOR_SYSTEM)
 
     def should_stop(self) -> bool:
         too_long, no_updates = False, False
         if self.max_dur is not None:
-            too_long = (default_timer() - self._start) >= self.max_dur
+            if too_long := ((default_timer() - self._start) >= self.max_dur):
+                self._logger.info(
+                    'Partition %d - maximum duration of %.2f seconds reached.',
+                    self.name, self.max_dur)
         if self.early_stop is not None:
-            no_updates = self._since_update >= self.early_stop
+            if no_updates := (self._since_update >= self.early_stop):
+                self._logger.info(
+                    'Partition %d - early stopping after %d messages.',
+                    self.name, self.early_stop)
+        if self._timed_out:
+            self._logger.info(
+                'Partition %d - timed out after %.2f seconds.',
+                self.name, self._timed_out)
         return self._timed_out or too_long or no_updates
 
-    # noinspection PyTypeChecker,PyUnresolvedReferences
     def receive(self) -> Optional[Any]:
-        if len((local := self.outbox[self.name])) > 0:
+        # Prioritize local convergence over processing remote messages.
+        if len((local := self._local)) > 0:
             msg = local.popleft()
         else:
             try:
                 msg = self.inbox.get(block=True, timeout=self.timeout)
             except Empty:
                 msg, self._timed_out = None, True
+        self._total_msgs += msg is not None
         return msg
 
     def on_next(self, msg: void) -> NoReturn:
+        """Update the variable node and send messages to neighbors."""
         factor, var, score = msg['src'], msg['dest'], msg['val']
-        if (val := score['val']) > (curr := self._nodes[var])['val']:
-            self._since_update, curr['val'] = 0, val
-        elif self.early_stop is not None:
-            self._since_update += 1
+        # As a variable node, update its current value.
+        self._update(var, score)
+        # As factor nodes, send a message to each neighboring variable node.
         factors = self.graph[var]['ne']
         self._send(array([score]), var, factors[factor != factors])
 
-    def _on_initial(self, scores: NpSeq) -> NoReturn:
+    def _update(self, var: Hashable, score: void) -> NoReturn:
+        """Update the exposure score of the current variable node."""
+        updated = False
+        if (new := score['val']) > self._nodes[var]['val']:
+            self._since_update, self._nodes[var]['val'] = 0, new
+            updated = True
+        if (new := score['time']) > self._nodes[var]['time']:
+            self._since_update, self._nodes[var]['time'] = 0, new
+            updated = True
+        if self.early_stop is not None and not updated:
+            self._since_update += 1
+
+    def _on_initial(self, scores: NpMap) -> NoReturn:
+        self._logger.info(
+            'Partition %d - number of nodes: %d', self.name, len(scores))
+        # Must be a mapping since indices may neither start at 0 nor be
+        # contiguous, based on the original input scores.
         self._nodes = {
-            n: {
-                'val': sort(nscores, order=('val', 'time')[-1])['val'],
-                'prev': defaultdict(lambda: DEFAULT_SCORE)}
-            for n, nscores in enumerate(scores)}
+            n: sort(nscores, order=('val', 'time'))[-1]
+            for n, nscores in scores.items()}
         graph, send = self.graph, self._send
-        for var, score in self._nodes.items():
-            send(score, var, graph[var]['ne'])
+        # Send initial symptom score messages to all neighbors.
+        for n, nscores in scores.items():
+            send(nscores, n, graph[n]['ne'])
 
     def _send(self, scores: ndarray, var: int, factors: ndarray):
-        graph, sgroup, send, time_buffer, time_const, transmission = (
-            self.graph, self.name, self.send, self.time_buffer,
-            self.time_const, self.transmission)
-        prev = self._nodes[var]['prev']
+        """Compute a factor node message and send if it will be effective."""
+        graph, curr, sgroup, send, time_buffer, time_const, transmission = (
+            self.graph, self._nodes[var], self.name, self.send,
+            self.time_buffer, self.time_const, self.transmission)
         for f in factors:
+            # Only consider scores that may have been transmitted from contact.
             recent = graph[fkey(var, f)]
             scores = scores[scores['time'] <= recent + time_buffer]
             if len(scores) > 0:
+                # Scales time deltas in partial days.
                 diff = (scores['time'] - recent) / DAY
+                # Use the log transform to avoid overflow issues.
                 weighted = log(scores['val']) + (diff / time_const)
-                maximum = scores[argmax(weighted)]
-                maximum['val'] *= transmission
-                newer = maximum['time'] > prev[f]['time']
-                higher = maximum['val'] > prev[f]['val']
-                if newer or higher:
+                score = scores[argmax(weighted)]
+                score['val'] *= transmission
+                # Only send if the message score has a higher value or time.
+                if score['time'] > curr['time'] or score['val'] > curr['val']:
                     dgroup = graph[f]['group']
-                    send(message(maximum, var, sgroup, f, dgroup, FACTOR))
-                    prev[f] = maximum
+                    send(message(score, var, sgroup, f, dgroup, FACTOR))
 
     def send(self, msg: Any, key: Hashable = None) -> NoReturn:
+        """Send a message either to the local inbox or an outbox."""
+        # msg must be a message structured array if key is None
         key = key if key is not None else msg['dgroup']
         if key == self.name:
-            # noinspection PyUnresolvedReferences
-            self.outbox[key].append(msg)
+            self._local.append(msg)
         else:
             self.outbox[key].put(msg, block=True, timeout=self.timeout)
 
 
 class RiskPropagation(ActorSystem):
     __slots__ = (
-        'send_thresh',
         'time_buffer',
         'time_const',
         'transmission',
@@ -162,8 +205,7 @@ class RiskPropagation(ActorSystem):
 
     def __init__(
             self,
-            send_thresh: float = 0.75,
-            time_buffer: float = 1.728e5,
+            time_buffer: int = 172_800,
             time_const: float = 1.,
             transmission: float = 0.8,
             parts: int = 1,
@@ -171,7 +213,6 @@ class RiskPropagation(ActorSystem):
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None):
         super().__init__(ACTOR_SYSTEM)
-        self.send_thresh = send_thresh
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
@@ -201,9 +242,8 @@ class RiskPropagation(ActorSystem):
     def _connect(self, graph: Graph) -> NoReturn:
         self.connect(*(
             Partition(
-                graph=graph,
                 name=name,
-                send_thresh=self.send_thresh,
+                graph=graph,
                 time_buffer=self.time_buffer,
                 time_const=self.time_const,
                 transmission=self.transmission,
@@ -212,11 +252,10 @@ class RiskPropagation(ActorSystem):
                 early_stop=self.early_stop)
             for name in range(self.parts)))
 
-    def _group(self, scores: NpSeq, idx: Iterable[int]) -> Sequence[NpSeq]:
-        groups = [list() for _ in range(self.parts)]
-        for i, e in zip(idx, scores):
-            # noinspection PyTypeChecker
-            groups[i].append(e)
+    def _group(self, scores: NpSeq, idx: Iterable[int]) -> Sequence[NpMap]:
+        groups = [dict() for _ in range(self.parts)]
+        for n, (g, nscores) in enumerate(zip(idx, scores)):
+            groups[g][n] = nscores
         return groups
 
     def send(self, *nodes: NpSeq) -> NoReturn:

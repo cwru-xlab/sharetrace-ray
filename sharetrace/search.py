@@ -15,7 +15,7 @@ from scipy.spatial import KDTree
 from sklearn.neighbors import BallTree
 
 from sharetrace.model import contact, event, to_coord
-from sharetrace.util import LOGGING_CONFIG, TimeDelta, Timer
+from sharetrace.util import LOGGING_CONFIG, Timer
 
 Locations = Histories = Sequence[ndarray]
 Contacts = ndarray
@@ -23,7 +23,6 @@ Pairs = Iterable[Tuple[ndarray, ndarray]]
 
 _rng = default_rng()
 _EMPTY = ()
-ZERO = timedelta64(0, 's')
 
 dictConfig(LOGGING_CONFIG)
 
@@ -31,9 +30,9 @@ dictConfig(LOGGING_CONFIG)
 class BaseContactSearch(ABC):
     __slots__ = ('min_dur', 'workers', '_logger')
 
-    def __init__(self, min_dur: TimeDelta = ZERO, workers: int = 1, **kwargs):
+    def __init__(self, min_dur: float = 0, workers: int = 1, **kwargs):
         super().__init__()
-        self.min_dur = timedelta64(min_dur)
+        self.min_dur = timedelta64(int(min_dur * 1e6), 'us')
         self.workers = workers
         self._logger = getLogger(__name__)
         self._log_params(min_dur=self.min_dur, workers=workers, **kwargs)
@@ -56,7 +55,7 @@ class BaseContactSearch(ABC):
 class BruteContactSearch(BaseContactSearch):
     __slots__ = ()
 
-    def __init__(self, min_dur: TimeDelta = ZERO, workers: int = 1, **kwargs):
+    def __init__(self, min_dur: float = 0, workers: int = 1, **kwargs):
         super().__init__(min_dur, workers, **kwargs)
 
     def search(self, histories: Histories) -> Contacts:
@@ -147,7 +146,7 @@ class TreeContactSearch(BruteContactSearch):
 
     def __init__(
             self,
-            min_dur: TimeDelta = ZERO,
+            min_dur: float = 0,
             workers: int = 1,
             r: float = 1e-4,
             leaf_size: int = 10,
@@ -205,7 +204,7 @@ class BallTreeContactSearch(TreeContactSearch):
 
     def __init__(
             self,
-            min_dur: TimeDelta = ZERO,
+            min_dur: float = 0,
             workers: int = 1,
             r: float = 1e-4,
             leaf_size: int = 10,
@@ -228,7 +227,7 @@ class KdTreeContactSearch(TreeContactSearch):
 
     def __init__(
             self,
-            min_dur: TimeDelta = ZERO,
+            min_dur: float = 0,
             workers: int = 1,
             r: float = 1e-4,
             leaf_size: int = 10,
