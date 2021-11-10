@@ -6,3 +6,4 @@ scikit-learn~=1.0.1
 pygeohash~=1.2.0
 pyproj~=3.2.1
 pymetis~=2020.1
+ray~=1.8.0

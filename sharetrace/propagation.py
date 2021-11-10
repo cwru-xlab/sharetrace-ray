@@ -4,18 +4,22 @@ from functools import reduce
 from logging import getLogger
 from logging.config import dictConfig
 from queue import Empty
+from time import sleep
 from timeit import default_timer
 from typing import (
     Any, Hashable, Iterable, Mapping, MutableMapping, NoReturn, Optional,
-    Sequence, Tuple
+    Sequence, Tuple, Type
 )
 
+import ray
 from numpy import (
     argmax, array, log, ndarray, sort, timedelta64, unique, void
 )
 from pymetis import part_graph
+from ray import ObjectRef
+from ray.util.queue import Empty as RayEmpty, Queue as RayQueue
 
-from lewicki.actors import ActorSystem, BaseActor
+from lewicki.actors import BaseActor, BaseActorSystem
 from sharetrace.model import message, node, risk_score
 from sharetrace.util import LOGGING_CONFIG, Timer
 
@@ -43,6 +47,7 @@ class Partition(BaseActor):
         'time_buffer',
         'time_const',
         'transmission',
+        'empty_except',
         'timeout',
         'max_dur',
         'early_stop',
@@ -51,7 +56,7 @@ class Partition(BaseActor):
         '_start',
         '_since_update',
         '_timed_out',
-        '_total_msgs',
+        '_msgs',
         '_logger')
 
     def __init__(
@@ -61,36 +66,42 @@ class Partition(BaseActor):
             time_buffer: int,
             time_const: float,
             transmission: float,
-            timeout: Optional[float],
-            max_dur: Optional[float],
-            early_stop: Optional[int]):
-        super().__init__(name)
+            empty_except: Type,
+            inbox: Optional[Any] = None,
+            timeout: Optional[float] = None,
+            max_dur: Optional[float] = None,
+            early_stop: Optional[int] = None):
+        super().__init__(name, inbox)
         self.graph = graph
         self.time_buffer = timedelta64(time_buffer, 's')
         self.time_const = time_const
         self.transmission = transmission
         self.timeout = timeout
+        self.empty_except = empty_except
         self.max_dur = max_dur
         self.early_stop = early_stop
         self._local = deque()
         self._nodes: Nodes = {}
-        self._start: int = -1
-        self._since_update: int = 0
-        self._timed_out: bool = False
-        self._total_msgs = 0
+        self._start = -1
+        self._since_update = 0
+        self._timed_out = False
+        self._msgs = 0
         self._logger = getLogger(__name__)
 
-    def run(self) -> NoReturn:
-        self._logger.info('Partition %d - initializing...', self.name)
+    def run(self) -> Optional[Mapping[int, float]]:
         timed = Timer.time(self._run)
-        self._logger.info(
-            'Partition %d - runtime: %.2f seconds', self.name, timed.seconds)
-        self._logger.info(
-            'Partition %d - messages processed: %d',
-            self.name, self._total_msgs)
         results = {n: data['curr'] for n, data in self._nodes.items()}
-        # Must send the results of the child process via queue.
-        self.send(results, ACTOR_SYSTEM)
+        self._log_stats(timed.seconds, results)
+        return self.on_complete(results)
+
+    def _log_stats(self, seconds: float, results: Mapping[int, float]):
+        log_info, name, nodes, msgs = (
+            self._logger.info, self.name, self._nodes, self._msgs)
+        log_info('Partition %d - runtime: %.2f seconds', name, seconds)
+        log_info('Partition %d - messages processed: %d', name, msgs)
+        diffs = (data['init']['val'] - results[n] for n, data in nodes.items())
+        updates = sum(map(lambda diff: diff != 0, diffs))
+        log_info('Partition %d - updates: %d', name, updates)
 
     def _run(self):
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
@@ -100,22 +111,27 @@ class Partition(BaseActor):
             if (msg := receive()) is not None:
                 on_next(msg)
 
+    def on_complete(self, results) -> Optional:
+        # Must send the results of the child process via queue.
+        self.send(results, ACTOR_SYSTEM)
+
     def should_stop(self) -> bool:
+        log_info, name = self._logger.info, self.name
         too_long, no_updates = False, False
-        if self.max_dur is not None:
-            if too_long := ((default_timer() - self._start) >= self.max_dur):
-                self._logger.info(
-                    'Partition %d - maximum duration of %.2f seconds reached.',
-                    self.name, self.max_dur)
-        if self.early_stop is not None:
-            if no_updates := (self._since_update >= self.early_stop):
-                self._logger.info(
-                    'Partition %d - early stopping after %d messages.',
-                    self.name, self.early_stop)
+        if (max_dur := self.max_dur) is not None:
+            if too_long := ((default_timer() - self._start) >= max_dur):
+                log_info(
+                    'Partition %d - maximum duration of %.2f seconds reached',
+                    name, max_dur)
+        if (early_stop := self.early_stop) is not None:
+            if no_updates := (self._since_update >= early_stop):
+                log_info(
+                    'Partition %d - early stopping after %d messages',
+                    name, early_stop)
         if self._timed_out:
-            self._logger.info(
+            log_info(
                 'Partition %d - timed out after %.2f seconds',
-                self.name, self.timeout)
+                name, self.timeout)
         return self._timed_out or too_long or no_updates
 
     def receive(self) -> Optional[Any]:
@@ -125,9 +141,9 @@ class Partition(BaseActor):
         else:
             try:
                 msg = self.inbox.get(block=True, timeout=self.timeout)
-            except Empty:
+            except self.empty_except:
                 msg, self._timed_out = None, True
-        self._total_msgs += msg is not None
+        self._msgs += msg is not None
         return msg
 
     def on_next(self, msg: void) -> NoReturn:
@@ -147,8 +163,7 @@ class Partition(BaseActor):
             self._since_update += 1
 
     def _on_initial(self, scores: NpMap) -> NoReturn:
-        self._logger.info(
-            'Partition %d - nodes: %d', self.name, len(scores))
+        self._logger.info('Partition %d - nodes: %d', self.name, len(scores))
         # Must be a mapping since indices may neither start at 0 nor be
         # contiguous, based on the original input scores.
         nodes = {}
@@ -205,7 +220,7 @@ class Partition(BaseActor):
             self.outbox[key].put(msg, block=True, timeout=self.timeout)
 
 
-class RiskPropagation(ActorSystem):
+class RiskPropagation(BaseActorSystem):
     __slots__ = (
         'time_buffer',
         'time_const',
@@ -224,8 +239,9 @@ class RiskPropagation(ActorSystem):
             parts: int = 1,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
-            early_stop: Optional[int] = None):
-        super().__init__(ACTOR_SYSTEM)
+            early_stop: Optional[int] = None,
+            inbox: Optional[Any] = None):
+        super().__init__(ACTOR_SYSTEM, inbox)
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
@@ -237,33 +253,34 @@ class RiskPropagation(ActorSystem):
 
     def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
         self._scores = len(scores)
-        graph, membership = self._create_graph(contacts)
+        graph, membership = self.create_graph(contacts)
         self._connect(graph)
         groups = self._group(scores, membership)
         self.send(*groups)
 
     def run(self) -> ndarray:
         super().run()
-        return self._results()
+        return self.results((self.receive() for _ in range(self.parts)))
 
-    def _results(self) -> ndarray:
-        results = reduce(
-            lambda d1, d2: {**d1, **d2},
-            (self.receive() for _ in range(self.parts)))
+    def results(self, results: Iterable) -> ndarray:
+        results = reduce(lambda d1, d2: {**d1, **d2}, results)
         return array([results[i] for i in range(self._scores)])
 
     def _connect(self, graph: Graph) -> NoReturn:
-        self.connect(*(
-            Partition(
-                name=name,
-                graph=graph,
-                time_buffer=self.time_buffer,
-                time_const=self.time_const,
-                transmission=self.transmission,
-                timeout=self.timeout,
-                max_dur=self.max_dur,
-                early_stop=self.early_stop)
-            for name in range(self.parts)))
+        create = self.create_partition
+        self.connect(*(create(name, graph) for name in range(self.parts)))
+
+    def create_partition(self, name: Hashable, graph: Graph) -> Partition:
+        return Partition(
+            name=name,
+            graph=graph,
+            time_buffer=self.time_buffer,
+            time_const=self.time_const,
+            transmission=self.transmission,
+            empty_except=Empty,
+            timeout=self.timeout,
+            max_dur=self.max_dur,
+            early_stop=self.early_stop)
 
     def _group(self, scores: NpSeq, idx: Iterable[int]) -> Sequence[NpMap]:
         groups = [dict() for _ in range(self.parts)]
@@ -275,7 +292,7 @@ class RiskPropagation(ActorSystem):
         for p, pnodes in enumerate(nodes):
             self.outbox[p].put(pnodes, block=True)
 
-    def _create_graph(self, contacts: NpSeq) -> Tuple[Graph, ndarray]:
+    def create_graph(self, contacts: NpSeq) -> Tuple[Graph, ndarray]:
         graph: MutableGraph = {}
         adj = defaultdict(list)
         # Assumes a name corresponds to an index in scores.
@@ -293,3 +310,81 @@ class RiskPropagation(ActorSystem):
     def partition(self, adj: NpSeq) -> ndarray:
         cuts, membership = part_graph(self.parts, adj)
         return membership
+
+
+class RayPartition(Partition):
+    __slots__ = ('_actor',)
+
+    def __init__(self, name: Hashable, inbox: RayQueue, **kwargs):
+        super().__init__(name, inbox=inbox, **kwargs)
+        self._actor = _RayPartition.remote(name, inbox=inbox, **kwargs)
+
+    def run(self) -> ObjectRef:
+        # Do not block to allow asynchronous invocation of actors.
+        return self._actor.run.remote()
+
+    def connect(self, *actors: BaseActor) -> NoReturn:
+        # Block to ensure all actors get connected before running.
+        ray.get(self._actor.connect.remote(*actors))
+
+
+@ray.remote
+class _RayPartition(Partition):
+    __slots__ = ()
+
+    def __init__(self, name: Hashable, inbox: RayQueue, **kwargs):
+        super().__init__(name, inbox=inbox, **kwargs)
+
+    def run(self) -> Optional[Mapping[int, float]]:
+        result = super().run()
+        # Allow the last partition output its log.
+        sleep(0.1)
+        return result
+
+    def on_complete(self, results):
+        # Returns the results, as opposed to using a queue to send them.
+        return results
+
+
+class RayRiskPropagation(RiskPropagation):
+    __slots__ = ()
+
+    def __init__(self, *args, **kwargs):
+        # Actor system does not need an inbox None uses multiprocessing.Queue.
+        super().__init__(*args, inbox=EMPTY, **kwargs)
+
+    def create_partition(self, name: Hashable, graph: ObjectRef) -> Partition:
+        # Ray Queue must be created and then passed as an object reference.
+        return RayPartition(
+            name=name,
+            inbox=RayQueue(),
+            graph=graph,
+            time_buffer=self.time_buffer,
+            time_const=self.time_const,
+            transmission=self.transmission,
+            empty_except=RayEmpty,
+            timeout=self.timeout,
+            max_dur=self.max_dur,
+            early_stop=self.early_stop)
+
+    def create_graph(self, contacts: NpSeq) -> Tuple[ObjectRef, ndarray]:
+        graph, membership = super().create_graph(contacts)
+        return ray.put(graph), membership
+
+    def run(self) -> Any:
+        # No need to use a queue since Ray actors can return results.
+        results = self.results(ray.get([a.run() for a in self.actors]))
+        ray.shutdown()
+        return results
+
+    def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
+        ray.init()
+        super().setup(scores, contacts)
+
+    def connect(self, *actors: BaseActor) -> NoReturn:
+        # Connect in order to send the initial message.
+        BaseActor.connect(self, *actors)
+        # Remember all actors in order to get their results.
+        self.actors.extend(actors)
+        # Each partition may need to communicate with all other partitions.
+        self._make_complete(*actors)
