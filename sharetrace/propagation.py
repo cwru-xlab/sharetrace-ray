@@ -21,7 +21,7 @@ from ray.util.queue import Empty as RayEmpty, Queue as RayQueue
 
 from lewicki.actors import BaseActor, BaseActorSystem
 from sharetrace.model import message, node, risk_score
-from sharetrace.util import LOGGING_CONFIG, Timer
+from sharetrace.util import LOGGING_CONFIG, Timer, get_size
 
 NpSeq = Sequence[ndarray]
 NpMap = Mapping[int, ndarray]
@@ -229,7 +229,8 @@ class RiskPropagation(BaseActorSystem):
         'timeout',
         'max_dur',
         'early_stop',
-        '_scores')
+        '_scores',
+        '_logger')
 
     def __init__(
             self,
@@ -250,6 +251,7 @@ class RiskPropagation(BaseActorSystem):
         self.max_dur = max_dur
         self.early_stop = early_stop
         self._scores: int = -1
+        self._logger = getLogger(__name__)
 
     def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
         self._scores = len(scores)
@@ -305,6 +307,7 @@ class RiskPropagation(BaseActorSystem):
         adj = [unique(adj.get(n, EMPTY)) for n in range(self._scores)]
         membership = self.partition(adj)
         graph.update((n, node(ne, membership[n])) for n, ne in enumerate(adj))
+        self._logger.info('Graph: %.4f MB', get_size(graph) / 1e6)
         return graph, membership
 
     def partition(self, adj: NpSeq) -> ndarray:

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import logging
-import sys
 from datetime import datetime, timedelta
+from inspect import isgetsetdescriptor, ismemberdescriptor
+from logging import INFO
+from sys import getsizeof, stdout
 from timeit import default_timer
 from typing import Any, Callable, Union
 
-from numpy import datetime64, timedelta64
+from numpy import datetime64, ndarray, timedelta64, void
 
 TimeDelta = Union[timedelta, timedelta64]
 DateTime = Union[datetime, datetime64]
@@ -15,11 +16,11 @@ LOGGING_CONFIG = {
     'version': 1,
     'loggers': {
         'root': {
-            'level': logging.INFO,
+            'level': INFO,
             'handlers': ['console']
         },
         'console': {
-            'level': logging.INFO,
+            'level': INFO,
             'handlers': ['console'],
             'propagate': False
         }
@@ -27,9 +28,9 @@ LOGGING_CONFIG = {
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'level': logging.INFO,
+            'level': INFO,
             'formatter': 'default',
-            'stream': sys.stdout,
+            'stream': stdout,
         }
     },
     'formatters': {
@@ -53,3 +54,43 @@ class Timer:
         result = func()
         stop = default_timer()
         return Timer(result, stop - start)
+
+
+def get_size(obj, seen=None):
+    """Recursively finds size of objects in bytes
+
+    References:
+        https://github.com/bosswissam/pysize/blob/master/pysize.py
+    """
+
+    if isinstance(obj, (ndarray, void)):
+        return obj.nbytes
+
+    size = getsizeof(obj)
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0
+    seen.add(obj_id)
+    if hasattr(obj, '__dict__'):
+        for cls in obj.__class__.__mro__:
+            if '__dict__' in cls.__dict__:
+                d = cls.__dict__['__dict__']
+                gs_descriptor = isgetsetdescriptor(d)
+                m_descriptor = ismemberdescriptor(d)
+                if gs_descriptor or m_descriptor:
+                    size += get_size(obj.__dict__, seen)
+                break
+    any_str = isinstance(obj, (str, bytes, bytearray))
+    if isinstance(obj, dict):
+        size += sum((get_size(v, seen) for v in obj.values()))
+        size += sum((get_size(k, seen) for k in obj.keys()))
+    elif hasattr(obj, '__iter__') and not any_str:
+        size += sum((get_size(i, seen) for i in obj))
+    if hasattr(obj, '__slots__'):
+        size += sum(
+            get_size(getattr(obj, s), seen)
+            for s in obj.__slots__
+            if hasattr(obj, s))
+    return size
