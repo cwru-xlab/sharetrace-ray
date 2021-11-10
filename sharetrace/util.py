@@ -15,11 +15,11 @@ LOGGING_CONFIG = {
     'version': 1,
     'loggers': {
         'root': {
-            'level': logging.DEBUG,
+            'level': logging.INFO,
             'handlers': ['console']
         },
         'console': {
-            'level': logging.DEBUG,
+            'level': logging.INFO,
             'handlers': ['console'],
             'propagate': False
         }
@@ -27,7 +27,7 @@ LOGGING_CONFIG = {
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'level': logging.DEBUG,
+            'level': logging.INFO,
             'formatter': 'default',
             'stream': sys.stdout,
         }
@@ -48,7 +48,7 @@ class Timer:
         self.seconds = seconds
 
     @classmethod
-    def time(cls, func: Callable) -> Timer:
+    def time(cls, func: Callable[[], Any]) -> Timer:
         start = default_timer()
         result = func()
         stop = default_timer()
