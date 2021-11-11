@@ -38,18 +38,12 @@ class Kind(Enum):
 
 
 class BaseContactSearch(ABC):
-    __slots__ = ('min_dur', 'workers', 'kind', '_logger')
+    __slots__ = ('min_dur', 'workers')
 
-    def __init__(
-            self,
-            min_dur: float = 0,
-            workers: int = 1,
-            kind: Optional[Kind] = None):
+    def __init__(self, min_dur: float = 0, workers: int = 1):
         super().__init__()
         self.min_dur = min_dur
         self.workers = workers
-        self.kind = kind
-        self._logger = getLogger(__name__)
 
     @abstractmethod
     def search(self, histories: Histories) -> Contacts:
@@ -61,11 +55,13 @@ class BaseContactSearch(ABC):
 
 
 class BruteContactSearch(BaseContactSearch):
-    __slots__ = ('_min_dur',)
+    __slots__ = ('kind', '_min_dur', '_logger')
 
     def __init__(self, min_dur: float = 0, workers: int = 1):
-        super().__init__(min_dur, workers, Kind.BRUTE)
+        super().__init__(min_dur, workers)
+        self.kind = Kind.BRUTE
         self._min_dur = timedelta64(int(min_dur * 1e6), 'us')
+        self._logger = getLogger(__name__)
 
     def search(self, histories: Histories) -> Contacts:
         timer = Timer.time(lambda: self._search(histories))
