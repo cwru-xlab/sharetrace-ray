@@ -15,7 +15,8 @@ from typing import (
 
 import ray
 from numpy import (
-    argmax, array, log, ndarray, sort, timedelta64, unique, void
+    argmax, array, count_nonzero, log, mean, ndarray, sort, std, timedelta64,
+    unique, void
 )
 from pymetis import part_graph
 from ray import ObjectRef
@@ -101,14 +102,18 @@ class Partition(BaseActor):
     def run(self) -> Optional[Mapping[int, float]]:
         timed = Timer.time(self._run)
         results = {n: data['curr'] for n, data in self._nodes.items()}
-        self._log_stats(timed.seconds, results)
+        self._log_stats(timed.seconds)
         return self.on_complete(results)
 
-    def _log_stats(self, runtime: float, results: Mapping[int, float]):
-        name, nodes = self.name, self._nodes
-        diffs = (data['init']['val'] - results[n] for n, data in nodes.items())
-        updates = int(sum(map(lambda diff: diff != 0, diffs)))
-        condition, data = self._stop_condition
+    def _log_stats(self, runtime: float):
+        name, nodes, (condition, data) = (
+            self.name, self._nodes, self._stop_condition)
+        init = array([data['init']['val'] for data in nodes.values()])
+        final = array([data['curr'] for data in nodes.values()])
+        updates = array([data['updates'] for data in nodes.values()])
+        ufiltered = updates[updates != 0]
+        diffs = final - init
+        dfiltered = diffs[diffs != 0]
         self._logger.info(
             dumps({
                 'Partition': name,
@@ -116,7 +121,23 @@ class Partition(BaseActor):
                 'Messages': self._msgs,
                 'Nodes': len(nodes),
                 'NodeDataInMb': round(get_mb(nodes), 4),
-                'NodeUpdates': updates,
+                'MinUpdate': round(float(min(diffs)), 4),
+                'MaxUpdate': round(float(max(diffs)), 4),
+                'AvgUpdate': round(float(mean(diffs)), 4),
+                'StdUpdate': round(float(std(diffs)), 4),
+                'FilteredMinUpdate': round(float(min(dfiltered)), 4),
+                'FilteredMaxUpdate': round(float(max(dfiltered)), 4),
+                'FilteredAvgUpdate': round(float(mean(dfiltered)), 4),
+                'FilteredStdUpdate': round(float(std(dfiltered)), 4),
+                'MinUpdates': int(min(updates)),
+                'MaxUpdates': int(max(updates)),
+                'AvgUpdates': round(float(mean(updates)), 4),
+                'StdUpdates': round(float(std(updates)), 4),
+                'FilteredMinUpdates': int(min(ufiltered)),
+                'FilteredMaxUpdates': int(max(ufiltered)),
+                'FilteredAvgUpdates': round(float(mean(ufiltered)), 4),
+                'FilteredStdUpdates': round(float(std(ufiltered)), 4),
+                'TotalUpdates': int(count_nonzero(ufiltered)),
                 'StopCondition': condition.name,
                 'StopData': data}))
 
@@ -168,7 +189,9 @@ class Partition(BaseActor):
     def _update(self, var: int, score: void) -> NoReturn:
         """Update the exposure score of the current variable node."""
         if (new := score['val']) > (data := self._nodes[var])['curr']:
-            self._since_update, data['curr'] = 0, new
+            self._since_update = 0
+            data['curr'] = new
+            data['updates'] += 1
         elif self.early_stop is not None:
             self._since_update += 1
 
@@ -181,7 +204,8 @@ class Partition(BaseActor):
             nodes[var] = {
                 'init': init,
                 'curr': init['val'],
-                'prev': defaultdict(lambda: DEFAULT_SCORE)}
+                'prev': defaultdict(lambda: DEFAULT_SCORE),
+                'updates': 0}
         self._nodes = nodes
         graph, send = self.graph, self._send
         # Send initial symptom score messages to all neighbors.
