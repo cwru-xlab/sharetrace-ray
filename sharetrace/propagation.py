@@ -106,6 +106,9 @@ class Partition(BaseActor):
         return self.on_complete(results)
 
     def _log_stats(self, runtime: float):
+        def round_float(val):
+            return round(float(val), 4)
+
         name, nodes, (condition, data) = (
             self.name, self._nodes, self._stop_condition)
         init = array([data['init']['val'] for data in nodes.values()])
@@ -120,23 +123,23 @@ class Partition(BaseActor):
                 'RuntimeInSec': round(runtime, 4),
                 'Messages': self._msgs,
                 'Nodes': len(nodes),
-                'NodeDataInMb': round(get_mb(nodes), 4),
-                'MinUpdate': round(float(min(diffs)), 4),
-                'MaxUpdate': round(float(max(diffs)), 4),
-                'AvgUpdate': round(float(mean(diffs)), 4),
-                'StdUpdate': round(float(std(diffs)), 4),
-                'FilteredMinUpdate': round(float(min(dfiltered)), 4),
-                'FilteredMaxUpdate': round(float(max(dfiltered)), 4),
-                'FilteredAvgUpdate': round(float(mean(dfiltered)), 4),
-                'FilteredStdUpdate': round(float(std(dfiltered)), 4),
+                'NodeDataInMb': round_float(get_mb(nodes)),
+                'MinUpdate': round_float(min(diffs)),
+                'MaxUpdate': round_float(max(diffs)),
+                'AvgUpdate': round_float(mean(diffs)),
+                'StdUpdate': round_float(std(diffs)),
+                'FilteredMinUpdate': round_float(min(dfiltered)),
+                'FilteredMaxUpdate': round_float(max(dfiltered)),
+                'FilteredAvgUpdate': round_float(mean(dfiltered)),
+                'FilteredStdUpdate': round_float(std(dfiltered)),
                 'MinUpdates': int(min(updates)),
                 'MaxUpdates': int(max(updates)),
-                'AvgUpdates': round(float(mean(updates)), 4),
-                'StdUpdates': round(float(std(updates)), 4),
+                'AvgUpdates': round_float(mean(updates)),
+                'StdUpdates': round_float(std(updates)),
                 'FilteredMinUpdates': int(min(ufiltered)),
                 'FilteredMaxUpdates': int(max(ufiltered)),
-                'FilteredAvgUpdates': round(float(mean(ufiltered)), 4),
-                'FilteredStdUpdates': round(float(std(ufiltered)), 4),
+                'FilteredAvgUpdates': round_float(mean(ufiltered)),
+                'FilteredStdUpdates': round_float(std(ufiltered)),
                 'TotalUpdates': int(count_nonzero(ufiltered)),
                 'StopCondition': condition.name,
                 'StopData': data}))
