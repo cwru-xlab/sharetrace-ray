@@ -4,8 +4,9 @@ from itertools import combinations
 from json import dumps
 from logging import getLogger
 from logging.config import dictConfig
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, \
-    Tuple
+from typing import (
+    Any, Dict, Iterable, Optional, Sequence, Tuple
+)
 
 from joblib import Parallel, delayed
 from numpy import (
@@ -37,7 +38,7 @@ class Kind(Enum):
 
 
 class BaseContactSearch(ABC):
-    __slots__ = ('min_dur', 'workers', 'kind', '_min_dur', '_logger')
+    __slots__ = ('min_dur', 'workers', 'kind', '_logger')
 
     def __init__(
             self,
@@ -46,7 +47,6 @@ class BaseContactSearch(ABC):
             kind: Optional[Kind] = None):
         super().__init__()
         self.min_dur = min_dur
-        self._min_dur = timedelta64(int(min_dur * 1e6), 'us')
         self.workers = workers
         self.kind = kind
         self._logger = getLogger(__name__)
@@ -61,16 +61,17 @@ class BaseContactSearch(ABC):
 
 
 class BruteContactSearch(BaseContactSearch):
-    __slots__ = ()
+    __slots__ = ('_min_dur',)
 
     def __init__(self, min_dur: float = 0, workers: int = 1):
         super().__init__(min_dur, workers, Kind.BRUTE)
+        self._min_dur = timedelta64(int(min_dur * 1e6), 'us')
 
     def search(self, histories: Histories) -> Contacts:
         timer = Timer.time(lambda: self._search(histories))
         result = timer.result
         stats = self.stats(len(histories), len(result), timer.seconds)
-        self._log_stats(stats)
+        self._logger.info(dumps(stats))
         return result
 
     def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
@@ -81,9 +82,6 @@ class BruteContactSearch(BaseContactSearch):
             'MinDurationInSec': self.min_dur,
             'Input': n,
             'Contacts': contacts}
-
-    def _log_stats(self, stats: Mapping[str, Any]):
-        self._logger.info(dumps(stats))
 
     def _search(self, histories: Histories) -> Contacts:
         pairs = self.pairs(histories)
