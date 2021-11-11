@@ -21,7 +21,7 @@ from ray.util.queue import Empty as RayEmpty, Queue as RayQueue
 
 from lewicki.actors import BaseActor, BaseActorSystem
 from sharetrace.model import message, node, risk_score
-from sharetrace.util import LOGGING_CONFIG, Timer, get_size
+from sharetrace.util import LOGGING_CONFIG, Timer, get_mb
 
 NpSeq = Sequence[ndarray]
 NpMap = Mapping[int, ndarray]
@@ -99,6 +99,7 @@ class Partition(BaseActor):
             self._logger.info, self.name, self._nodes, self._msgs)
         log_info('Partition %d - runtime: %.2f seconds', name, seconds)
         log_info('Partition %d - messages processed: %d', name, msgs)
+        log_info('Partition %d - node data: %.4f MB', name, get_mb(nodes))
         diffs = (data['init']['val'] - results[n] for n, data in nodes.items())
         updates = sum(map(lambda diff: diff != 0, diffs))
         log_info('Partition %d - updates: %d', name, updates)
@@ -307,7 +308,7 @@ class RiskPropagation(BaseActorSystem):
         adj = [unique(adj.get(n, EMPTY)) for n in range(self._scores)]
         membership = self.partition(adj)
         graph.update((n, node(ne, membership[n])) for n, ne in enumerate(adj))
-        self._logger.info('Graph: %.4f MB', get_size(graph) / 1e6)
+        self._logger.info('Graph: %.4f MB', get_mb(graph))
         return graph, membership
 
     def partition(self, adj: NpSeq) -> ndarray:

@@ -56,7 +56,11 @@ class Timer:
         return Timer(result, stop - start)
 
 
-def get_size(obj, seen=None):
+def get_mb(obj):
+    return get_bytes(obj) / 1e6
+
+
+def get_bytes(obj, seen=None):
     """Recursively finds size of objects in bytes
 
     References:
@@ -80,17 +84,17 @@ def get_size(obj, seen=None):
                 gs_descriptor = isgetsetdescriptor(d)
                 m_descriptor = ismemberdescriptor(d)
                 if gs_descriptor or m_descriptor:
-                    size += get_size(obj.__dict__, seen)
+                    size += get_bytes(obj.__dict__, seen)
                 break
     any_str = isinstance(obj, (str, bytes, bytearray))
     if isinstance(obj, dict):
-        size += sum((get_size(v, seen) for v in obj.values()))
-        size += sum((get_size(k, seen) for k in obj.keys()))
+        size += sum((get_bytes(v, seen) for v in obj.values()))
+        size += sum((get_bytes(k, seen) for k in obj.keys()))
     elif hasattr(obj, '__iter__') and not any_str:
-        size += sum((get_size(i, seen) for i in obj))
+        size += sum((get_bytes(i, seen) for i in obj))
     if hasattr(obj, '__slots__'):
         size += sum(
-            get_size(getattr(obj, s), seen)
+            get_bytes(getattr(obj, s), seen)
             for s in obj.__slots__
             if hasattr(obj, s))
     return size
