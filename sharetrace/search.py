@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
+from enum import Enum
 from itertools import combinations
+from json import dumps
 from logging import getLogger
 from logging.config import dictConfig
-from typing import Iterable, NoReturn, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, \
+    Tuple
 
 from joblib import Parallel, delayed
 from numpy import (
@@ -21,27 +24,32 @@ Locations = Histories = Sequence[void]
 Contacts = ndarray
 Pairs = Iterable[Tuple[void, void]]
 
-_rng = default_rng()
-_EMPTY = ()
+rng = default_rng()
+EMPTY = ()
 
 dictConfig(LOGGING_CONFIG)
 
 
+class Kind(Enum):
+    BRUTE = 'brute'
+    KD_TREE = 'kd_tree'
+    BALL_TREE = 'ball_tree'
+
+
 class BaseContactSearch(ABC):
-    __slots__ = ('min_dur', 'workers', '_logger')
+    __slots__ = ('min_dur', 'workers', 'kind', '_min_dur', '_logger')
 
-    def __init__(self, min_dur: float = 0, workers: int = 1, **kwargs):
+    def __init__(
+            self,
+            min_dur: float = 0,
+            workers: int = 1,
+            kind: Optional[Kind] = None):
         super().__init__()
-        self.min_dur = timedelta64(int(min_dur * 1e6), 'us')
+        self.min_dur = min_dur
+        self._min_dur = timedelta64(int(min_dur * 1e6), 'us')
         self.workers = workers
+        self.kind = kind
         self._logger = getLogger(__name__)
-        self._log_params(min_dur=self.min_dur, workers=workers, **kwargs)
-
-    def _log_params(self, **kwargs):
-        self._logger.debug(
-            '%s parameters: %s',
-            self.__class__.__name__,
-            {str(k): str(v) for k, v in kwargs.items()})
 
     @abstractmethod
     def search(self, histories: Histories) -> Contacts:
@@ -55,22 +63,33 @@ class BaseContactSearch(ABC):
 class BruteContactSearch(BaseContactSearch):
     __slots__ = ()
 
-    def __init__(self, min_dur: float = 0, workers: int = 1, **kwargs):
-        super().__init__(min_dur, workers, **kwargs)
+    def __init__(self, min_dur: float = 0, workers: int = 1):
+        super().__init__(min_dur, workers, Kind.BRUTE)
 
     def search(self, histories: Histories) -> Contacts:
         timer = Timer.time(lambda: self._search(histories))
-        self._logger.info(
-            '%s: %.2f seconds', self.__class__.__name__, timer.seconds)
-        return timer.result
+        result = timer.result
+        stats = self.stats(len(histories), len(result), timer.seconds)
+        self._log_stats(stats)
+        return result
+
+    def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
+        return {
+            'Kind': self.kind.name,
+            'RuntimeInSec': round(runtime, 4),
+            'Workers': self.workers,
+            'MinDurationInSec': self.min_dur,
+            'Input': n,
+            'Contacts': contacts}
+
+    def _log_stats(self, stats: Mapping[str, Any]):
+        self._logger.info(dumps(stats))
 
     def _search(self, histories: Histories) -> Contacts:
-        self._logger.info('Initiating contact search...')
         pairs = self.pairs(histories)
         par = Parallel(n_jobs=self.workers)
         contacts = par(delayed(self._find_contact)(*p) for p in pairs)
         contacts = array([c for c in contacts if c is not None])
-        self._logger.info('Contacts found: %d', len(contacts))
         return contacts
 
     def pairs(self, histories: Histories) -> Pairs:
@@ -127,7 +146,7 @@ class BruteContactSearch(BaseContactSearch):
     def _event(self, start, loc1: void, loc2: void) -> Iterable[ndarray]:
         end = self._earlier(loc1, loc2)
         dur = end - start
-        return [event(start, dur)] if dur >= self.min_dur else _EMPTY
+        return [event(start, dur)] if dur >= self._min_dur else EMPTY
 
     @staticmethod
     def _later(loc1: void, loc2: void) -> float:
@@ -148,26 +167,25 @@ class TreeContactSearch(BruteContactSearch):
             min_dur: float = 0,
             workers: int = 1,
             r: float = 1e-4,
-            leaf_size: int = 10,
-            **kwargs):
-        super().__init__(
-            min_dur, workers, r=r, leaf_size=leaf_size, **kwargs)
+            leaf_size: int = 10):
+        super().__init__(min_dur, workers)
         self.r = r
         self.leaf_size = leaf_size
 
     def pairs(self, histories: Histories) -> Pairs:
-        self._logger.debug('Mapping location histories to coordinates...')
         locs = self.to_coordinates(histories)
-        self._logger.debug('Indexing coordinates to map back to users...')
         idx = self.index(locs)
-        self._logger.debug('Querying pairs using spatial indexing...')
         pairs = self.query_pairs(concatenate(locs))
-        self._logger.debug('Filtering histories based on queried pairs...')
         return self.filter(pairs, idx, histories)
 
     def to_coordinates(self, hists: Histories) -> Histories:
         par = Parallel(self.workers)
         return par(delayed(self._to_coordinates)(h) for h in hists)
+
+    def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
+        stats = super().stats(n, contacts, runtime)
+        stats.update({'Radius': self.r, 'LeafSize': self.leaf_size})
+        return stats
 
     @staticmethod
     def index(locations: Locations) -> ndarray:
@@ -178,24 +196,14 @@ class TreeContactSearch(BruteContactSearch):
     def query_pairs(self, locs: ndarray) -> ndarray:
         raise NotImplementedError
 
-    def filter(self, pairs: ndarray, idx: ndarray, hists: Histories) -> Pairs:
+    @staticmethod
+    def filter(pairs: ndarray, idx: ndarray, hists: Histories) -> Pairs:
         selected = unique(idx[pairs], axis=0)
-        self._log_stats(len(hists), len(selected))
         return ((hists[h1], hists[h2]) for (h1, h2) in selected if h1 != h2)
 
     @staticmethod
     def _to_coordinates(hist: ndarray) -> ndarray:
         return vstack([to_coord(loc)['loc'] for loc in hist['locs']])
-
-    def _log_stats(self, hists: int, pairs: int) -> NoReturn:
-        combos = hists ** 2
-        dec = self._percent_decrease(combos, pairs)
-        self._logger.info(
-            'Pairs (tree / brute): %d / %d (%.2f percent)', pairs, combos, dec)
-
-    @staticmethod
-    def _percent_decrease(org, new) -> float:
-        return 0 if org == 0 else round(100 * (new - org) / org, 2)
 
 
 class BallTreeContactSearch(TreeContactSearch):
@@ -206,14 +214,12 @@ class BallTreeContactSearch(TreeContactSearch):
             min_dur: float = 0,
             workers: int = 1,
             r: float = 1e-4,
-            leaf_size: int = 10,
-            **kwargs):
-        super().__init__(min_dur, workers, r, leaf_size, **kwargs)
+            leaf_size: int = 10):
+        super().__init__(min_dur, workers, r, leaf_size)
+        self.kind = Kind.BALL_TREE
 
     def query_pairs(self, locs: ndarray) -> ndarray:
-        self._logger.debug('Constructing a ball tree spatial index')
         ball_tree = BallTree(locs, self.leaf_size, 'haversine')
-        self._logger.debug('Querying for pairs')
         points = ball_tree.query_radius(locs, self.r)
         idx = self.index(points)
         points = concatenate(points)
@@ -231,18 +237,21 @@ class KdTreeContactSearch(TreeContactSearch):
             r: float = 1e-4,
             leaf_size: int = 10,
             eps: int = 1e-5,
-            p: float = 2,
-            **kwargs):
-        super().__init__(min_dur, workers, r, leaf_size, eps=eps, p=p, **kwargs)
+            p: float = 2):
+        super().__init__(min_dur, workers, r, leaf_size)
+        self.kind = Kind.KD_TREE
         self.eps = eps
         self.p = p
 
     def query_pairs(self, locs: ndarray) -> ndarray:
         locs = self._project(locs)
-        self._logger.debug('Constructing a k-d tree spatial index')
         kd_tree = KDTree(locs, self.leaf_size)
-        self._logger.debug('Querying for pairs')
         return kd_tree.query_pairs(self.r, self.p, self.eps, 'ndarray')
+
+    def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
+        stats = super().stats(n, contacts, runtime)
+        stats.update({'Epsilon': self.eps, 'MinkowskiNorm': self.p})
+        return stats
 
     @staticmethod
     def _project(coordinates: ndarray) -> ndarray:

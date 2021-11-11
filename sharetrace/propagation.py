@@ -1,6 +1,8 @@
 import datetime
 from collections import defaultdict, deque
+from enum import Enum
 from functools import reduce
+from json import dumps
 from logging import getLogger
 from logging.config import dictConfig
 from queue import Empty
@@ -41,6 +43,12 @@ def fkey(n1, n2) -> Tuple[Any, Any]:
     return min(n1, n2), max(n1, n2)
 
 
+class StopCondition(Enum):
+    EARLY_STOP = 'early_stop'
+    TIMED_OUT = 'timed_out'
+    MAX_DURATION = 'max_duration'
+
+
 class Partition(BaseActor):
     __slots__ = (
         'graph',
@@ -56,6 +64,7 @@ class Partition(BaseActor):
         '_start',
         '_since_update',
         '_timed_out',
+        '_stop_condition',
         '_msgs',
         '_logger')
 
@@ -86,6 +95,7 @@ class Partition(BaseActor):
         self._since_update = 0
         self._timed_out = False
         self._msgs = 0
+        self._stop_condition: Tuple[StopCondition, float] = tuple()
         self._logger = getLogger(__name__)
 
     def run(self) -> Optional[Mapping[int, float]]:
@@ -94,15 +104,21 @@ class Partition(BaseActor):
         self._log_stats(timed.seconds, results)
         return self.on_complete(results)
 
-    def _log_stats(self, seconds: float, results: Mapping[int, float]):
-        log_info, name, nodes, msgs = (
-            self._logger.info, self.name, self._nodes, self._msgs)
-        log_info('Partition %d - runtime: %.2f seconds', name, seconds)
-        log_info('Partition %d - messages processed: %d', name, msgs)
-        log_info('Partition %d - node data: %.4f MB', name, get_mb(nodes))
+    def _log_stats(self, runtime: float, results: Mapping[int, float]):
+        name, nodes = self.name, self._nodes
         diffs = (data['init']['val'] - results[n] for n, data in nodes.items())
-        updates = sum(map(lambda diff: diff != 0, diffs))
-        log_info('Partition %d - updates: %d', name, updates)
+        updates = int(sum(map(lambda diff: diff != 0, diffs)))
+        condition, data = self._stop_condition
+        self._logger.info(
+            dumps({
+                'Partition': name,
+                'RuntimeInSec': round(runtime, 4),
+                'Messages': self._msgs,
+                'Nodes': len(nodes),
+                'NodeDataInMb': round(get_mb(nodes), 4),
+                'NodeUpdates': updates,
+                'StopCondition': condition.name,
+                'StopData': data}))
 
     def _run(self):
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
@@ -117,22 +133,15 @@ class Partition(BaseActor):
         self.send(results, ACTOR_SYSTEM)
 
     def should_stop(self) -> bool:
-        log_info, name = self._logger.info, self.name
         too_long, no_updates = False, False
         if (max_dur := self.max_dur) is not None:
             if too_long := ((default_timer() - self._start) >= max_dur):
-                log_info(
-                    'Partition %d - maximum duration of %.2f seconds reached',
-                    name, max_dur)
+                self._stop_condition = (StopCondition.MAX_DURATION, max_dur)
         if (early_stop := self.early_stop) is not None:
             if no_updates := (self._since_update >= early_stop):
-                log_info(
-                    'Partition %d - early stopping after %d messages',
-                    name, early_stop)
+                self._stop_condition = (StopCondition.EARLY_STOP, early_stop)
         if self._timed_out:
-            log_info(
-                'Partition %d - timed out after %.2f seconds',
-                name, self.timeout)
+            self._stop_condition = (StopCondition.TIMED_OUT, self.timeout)
         return self._timed_out or too_long or no_updates
 
     def receive(self) -> Optional[Any]:
@@ -164,7 +173,6 @@ class Partition(BaseActor):
             self._since_update += 1
 
     def _on_initial(self, scores: NpMap) -> NoReturn:
-        self._logger.info('Partition %d - nodes: %d', self.name, len(scores))
         # Must be a mapping since indices may neither start at 0 nor be
         # contiguous, based on the original input scores.
         nodes = {}
@@ -308,7 +316,7 @@ class RiskPropagation(BaseActorSystem):
         adj = [unique(adj.get(n, EMPTY)) for n in range(self._scores)]
         membership = self.partition(adj)
         graph.update((n, node(ne, membership[n])) for n, ne in enumerate(adj))
-        self._logger.info('Graph: %.4f MB', get_mb(graph))
+        self._logger.info(dumps({'GraphSizeInMb': round(get_mb(graph), 4)}))
         return graph, membership
 
     def partition(self, adj: NpSeq) -> ndarray:
