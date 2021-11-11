@@ -120,7 +120,7 @@ class Partition(BaseActor):
         self._logger.info(
             dumps({
                 'Partition': name,
-                'RuntimeInSec': round(runtime, 4),
+                'RuntimeInSec': round_float(runtime),
                 'Messages': self._msgs,
                 'Nodes': len(nodes),
                 'NodeDataInMb': round_float(get_mb(nodes)),
