@@ -9,14 +9,14 @@ from queue import Empty
 from time import sleep
 from timeit import default_timer
 from typing import (
-    Any, Hashable, Iterable, Mapping, MutableMapping, NoReturn, Optional,
+    Any, Dict, Hashable, Iterable, Mapping, MutableMapping, NoReturn, Optional,
     Sequence, Tuple, Type
 )
 
 import ray
 from numpy import (
-    argmax, array, count_nonzero, log, mean, ndarray, sort, std, timedelta64,
-    unique, void
+    argmax, array, clip, count_nonzero, inf, log, mean, ndarray, sort, std,
+    timedelta64, unique, void
 )
 from pymetis import part_graph
 from ray import ObjectRef
@@ -40,7 +40,7 @@ DEFAULT_SCORE = risk_score(0, datetime.datetime.min)
 dictConfig(LOGGING_CONFIG)
 
 
-def fkey(n1, n2) -> Tuple[Any, Any]:
+def ckey(n1, n2) -> Tuple[Any, Any]:
     return min(n1, n2), max(n1, n2)
 
 
@@ -223,11 +223,11 @@ class Partition(BaseActor):
             self.transmission)
         for f in factors:
             # Only consider scores that may have been transmitted from contact.
-            recent = graph[fkey(var, f)]
-            scores = scores[scores['time'] <= recent + buffer]
+            ctime = graph[ckey(var, f)]
+            scores = scores[scores['time'] <= ctime + buffer]
             if len(scores) > 0:
                 # Scales time deltas in partial days.
-                diff = (scores['time'] - recent) / DAY
+                diff = clip((scores['time'] - ctime) / DAY, -inf, 0)
                 # Use the log transform to avoid overflow issues.
                 weighted = log(scores['val']) + (diff / const)
                 score = scores[argmax(weighted)]
@@ -298,9 +298,10 @@ class RiskPropagation(BaseActorSystem):
 
     def run(self) -> ndarray:
         super().run()
-        return self.results((self.receive() for _ in range(self.parts)))
+        receive = self.receive
+        return self._map((receive() for _ in range(self.parts)))
 
-    def results(self, results: Iterable) -> ndarray:
+    def _map(self, results: Iterable[Dict]) -> ndarray:
         results = reduce(lambda d1, d2: {**d1, **d2}, results)
         return array([results[i] for i in range(self._scores)])
 
@@ -327,8 +328,9 @@ class RiskPropagation(BaseActorSystem):
         return groups
 
     def send(self, *nodes: NpSeq) -> NoReturn:
+        outbox = self.outbox
         for p, pnodes in enumerate(nodes):
-            self.outbox[p].put(pnodes, block=True)
+            outbox[p].put(pnodes, block=True)
 
     def create_graph(self, contacts: NpSeq) -> Tuple[Graph, ndarray]:
         graph: MutableGraph = {}
@@ -338,7 +340,7 @@ class RiskPropagation(BaseActorSystem):
             n1, n2 = contact['names']
             adj[n1].append(n2)
             adj[n2].append(n1)
-            graph[fkey(n1, n2)] = contact['time']
+            graph[ckey(n1, n2)] = contact['time']
         # Keep indexing consistent in case of users that have no contacts.
         adj = [unique(adj.get(n, EMPTY)) for n in range(self._scores)]
         membership = self.partition(adj)
@@ -412,7 +414,7 @@ class RayRiskPropagation(RiskPropagation):
 
     def run(self) -> Any:
         # No need to use a queue since Ray actors can return results.
-        results = self.results(ray.get([a.run() for a in self.actors]))
+        results = self._map(ray.get([a.run() for a in self.actors]))
         ray.shutdown()
         return results
 
