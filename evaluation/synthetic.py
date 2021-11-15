@@ -174,7 +174,7 @@ def generate_data():
 
 def main():
     # generate_data()
-    n = 100
+    n = 1000
     histories = generate_histories(
         n,
         events=25,
@@ -187,9 +187,11 @@ def main():
     scores = generate_scores(n)
     contact_search = search.KdTreeContactSearch(min_dur=900, workers=-1)
     contacts = contact_search.search(histories)
-    risk_propagation = propagation.RayRiskPropagation(parts=4, timeout=3)
-    risk_propagation.setup(scores, contacts)
-    risk_propagation.run()
+    for t in np.arange(0.1, 1.1, 0.1):
+        risk_propagation = propagation.RayRiskPropagation(
+            parts=4, early_stop=10_000, tol=t, timeout=3)
+        risk_propagation.setup(scores, contacts)
+        risk_propagation.run()
 
 
 if __name__ == '__main__':
