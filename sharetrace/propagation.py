@@ -2,6 +2,7 @@ import datetime
 from collections import defaultdict, deque
 from enum import Enum
 from functools import reduce
+from itertools import product
 from json import dumps
 from logging import getLogger
 from logging.config import dictConfig
@@ -15,7 +16,7 @@ from typing import (
 
 import ray
 from numpy import (
-    argmax, array, clip, count_nonzero, inf, log, mean, ndarray, sort, std,
+    argmax, array, clip, inf, log, mean, ndarray, sort, std,
     timedelta64, unique, void
 )
 from pymetis import part_graph
@@ -35,13 +36,17 @@ Nodes = Mapping[int, void]
 ACTOR_SYSTEM = -1
 DAY = timedelta64(1, 'D')
 EMPTY = ()
+# This is only used for comparison. Cannot use exactly 0 with log.
 DEFAULT_SCORE = risk_score(0, datetime.datetime.min)
-
 dictConfig(LOGGING_CONFIG)
 
 
 def ckey(n1, n2) -> Tuple[Any, Any]:
     return min(n1, n2), max(n1, n2)
+
+
+def round_float(val):
+    return round(float(val), 4)
 
 
 class StopCondition(Enum):
@@ -56,6 +61,7 @@ class Partition(BaseActor):
         'time_buffer',
         'time_const',
         'transmission',
+        'tol',
         'empty_except',
         'timeout',
         'max_dur',
@@ -64,6 +70,7 @@ class Partition(BaseActor):
         '_nodes',
         '_start',
         '_since_update',
+        '_init_done',
         '_timed_out',
         '_stop_condition',
         '_msgs',
@@ -76,6 +83,7 @@ class Partition(BaseActor):
             time_buffer: int,
             time_const: float,
             transmission: float,
+            tol: float,
             empty_except: Type,
             inbox: Optional[Any] = None,
             timeout: Optional[float] = None,
@@ -86,6 +94,7 @@ class Partition(BaseActor):
         self.time_buffer = timedelta64(time_buffer, 's')
         self.time_const = time_const
         self.transmission = transmission
+        self.tol = tol
         self.timeout = timeout
         self.empty_except = empty_except
         self.max_dur = max_dur
@@ -94,6 +103,7 @@ class Partition(BaseActor):
         self._nodes: Nodes = {}
         self._start = -1
         self._since_update = 0
+        self._init_done = False
         self._timed_out = False
         self._msgs = 0
         self._stop_condition: Tuple[StopCondition, float] = tuple()
@@ -101,48 +111,34 @@ class Partition(BaseActor):
 
     def run(self) -> Optional[Mapping[int, float]]:
         timed = Timer.time(self._run)
-        results = {n: data['curr'] for n, data in self._nodes.items()}
+        results = {n: props['curr'] for n, props in self._nodes.items()}
         self._log_stats(timed.seconds)
         return self.on_complete(results)
 
     def _log_stats(self, runtime: float):
-        def round_float(val):
-            return round(float(val), 4)
+        def safe_stat(func, values):
+            return 0 if len(values) == 0 else round_float(func(values))
 
-        name, nodes, (condition, data) = (
-            self.name, self._nodes, self._stop_condition)
-        init = array([data['init']['val'] for data in nodes.values()])
-        final = array([data['curr'] for data in nodes.values()])
-        updates = array([data['updates'] for data in nodes.values()])
-        ufiltered = updates[updates != 0]
-        diffs = final - init
-        dfiltered = diffs[diffs != 0]
-        self._logger.info(
-            dumps({
-                'Partition': name,
-                'RuntimeInSec': round_float(runtime),
-                'Messages': self._msgs,
-                'Nodes': len(nodes),
-                'NodeDataInMb': round_float(get_mb(nodes)),
-                'MinUpdate': round_float(min(diffs)),
-                'MaxUpdate': round_float(max(diffs)),
-                'AvgUpdate': round_float(mean(diffs)),
-                'StdUpdate': round_float(std(diffs)),
-                'FilteredMinUpdate': round_float(min(dfiltered)),
-                'FilteredMaxUpdate': round_float(max(dfiltered)),
-                'FilteredAvgUpdate': round_float(mean(dfiltered)),
-                'FilteredStdUpdate': round_float(std(dfiltered)),
-                'MinUpdates': int(min(updates)),
-                'MaxUpdates': int(max(updates)),
-                'AvgUpdates': round_float(mean(updates)),
-                'StdUpdates': round_float(std(updates)),
-                'FilteredMinUpdates': int(min(ufiltered)),
-                'FilteredMaxUpdates': int(max(ufiltered)),
-                'FilteredAvgUpdates': round_float(mean(ufiltered)),
-                'FilteredStdUpdates': round_float(std(ufiltered)),
-                'TotalUpdates': int(count_nonzero(ufiltered)),
-                'StopCondition': condition.name,
-                'StopData': data}))
+        nodes, (condition, data) = self._nodes, self._stop_condition
+        update = array([
+            props['curr'] - props['init_val'] for props in nodes.values()])
+        update = update[update != 0]
+        updates = array([props['updates'] for props in nodes.values()])
+        updates = updates[updates != 0]
+        logged = {
+            'Partition': self.name,
+            'RuntimeInSec': round_float(runtime),
+            'Messages': self._msgs,
+            'Nodes': len(nodes),
+            'NodeDataInMb': round_float(get_mb(nodes)),
+            'Updates': len(updates),
+            'StopCondition': condition.name,
+            'StopData': data}
+        data = ((update, '{}Update'), (updates, '{}Updates'))
+        funcs = ((min, 'Min'), (max, 'Max'), (mean, 'Avg'), (std, 'Std'))
+        for (datum, name), (f, fname) in product(data, funcs):
+            logged[name.format(fname)] = safe_stat(f, datum)
+        self._logger.info(dumps(logged))
 
     def _run(self):
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
@@ -191,11 +187,11 @@ class Partition(BaseActor):
 
     def _update(self, var: int, score: void) -> NoReturn:
         """Update the exposure score of the current variable node."""
-        if (new := score['val']) > (data := self._nodes[var])['curr']:
+        if (new := score['val']) > (props := self._nodes[var])['curr']:
             self._since_update = 0
-            data['curr'] = new
-            data['updates'] += 1
-        elif self.early_stop is not None:
+            props['curr'] = new
+            props['updates'] += 1
+        elif self.early_stop is not None and self._init_done:
             self._since_update += 1
 
     def _on_initial(self, scores: NpMap) -> NoReturn:
@@ -204,23 +200,25 @@ class Partition(BaseActor):
         nodes = {}
         for var, vscores in scores.items():
             init = sort(vscores, order=('val', 'time'))[-1]
+            init_msg = init.copy()
+            init_msg['val'] *= self.transmission
             nodes[var] = {
-                'init': init,
+                'init_val': init['val'],
+                'init_msg': init_msg,
                 'curr': init['val'],
-                'prev': defaultdict(lambda: DEFAULT_SCORE),
                 'updates': 0}
         self._nodes = nodes
         graph, send = self.graph, self._send
         # Send initial symptom score messages to all neighbors.
         for var, vscores in scores.items():
             send(vscores, var, graph[var]['ne'])
+        self._init_done = True
 
     def _send(self, scores: ndarray, var: int, factors: ndarray):
         """Compute a factor node message and send if it will be effective."""
-        graph, init, prev, sgroup, send, buffer, const, transmission = (
-            self.graph, self._nodes[var]['init'], self._nodes[var]['prev'],
-            self.name, self.send, self.time_buffer, self.time_const,
-            self.transmission)
+        graph, init, sgroup, send, buffer, tol, const, transmission = (
+            self.graph, self._nodes[var]['init_msg'], self.name, self.send,
+            self.time_buffer, self.tol, self.time_const, self.transmission)
         for f in factors:
             # Only consider scores that may have been transmitted from contact.
             ctime = graph[ckey(var, f)]
@@ -232,24 +230,27 @@ class Partition(BaseActor):
                 weighted = log(scores['val']) + (diff / const)
                 score = scores[argmax(weighted)]
                 score['val'] *= transmission
-                # Always send if the value is higher as it will always result
-                # in an update to the neighbor value, but may not result in
-                # them propagating the message, depending on the time.
-                higher = score['val'] > prev[f]['val']
-                # If the score is newer and is at least as high as what was
-                # initially sent, then send the message. This will not result
-                # in an update to the neighbor value, but may result in
-                # propagating the message, depending on the value and time.
-                newer = score['time'] > prev[f]['time']
-                high_enough = score['val'] >= init['val']
-                if higher or (newer and high_enough):
+                # This is a necessary, but not sufficient, condition for the
+                # value of a neighbor to be updated. The transmission rate
+                # causes the value of a score to monotonically decrease as it
+                # propagates further from its source. Thus, this criterion
+                # will converge. A higher tolerance results in faster
+                # convergence at the cost of completeness.
+                high_enough = score['val'] > init['val'] * tol
+                # The older the score, the likelier it is to be propagated,
+                # regardless of its value. A newer score with a lower value
+                # will not result in an update to the neighbor. This
+                # criterion will not converge as messages do not get older.
+                # The conjunction of the first criterion allows for convergence.
+                older = score['time'] < init['time']
+                if high_enough and older:
                     send(message(score, var, sgroup, f, graph[f]['group']))
-                    prev[f] = score
 
     def send(self, msg: Any, key: int = None) -> NoReturn:
         """Send a message either to the local inbox or an outbox."""
         # msg must be a message structured array if key is None
-        key = key if key is not None else msg['dgroup']
+        if key is None:
+            key = msg['dgroup']
         if key == self.name:
             self._local.append(msg)
         else:
@@ -261,6 +262,7 @@ class RiskPropagation(BaseActorSystem):
         'time_buffer',
         'time_const',
         'transmission',
+        'tol',
         'parts',
         'timeout',
         'max_dur',
@@ -273,6 +275,7 @@ class RiskPropagation(BaseActorSystem):
             time_buffer: int = 172_800,
             time_const: float = 1.,
             transmission: float = 0.8,
+            tol: float = 0.1,
             parts: int = 1,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
@@ -282,6 +285,7 @@ class RiskPropagation(BaseActorSystem):
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
+        self.tol = tol
         self.parts = parts
         self.timeout = timeout
         self.max_dur = max_dur
@@ -316,6 +320,7 @@ class RiskPropagation(BaseActorSystem):
             time_buffer=self.time_buffer,
             time_const=self.time_const,
             transmission=self.transmission,
+            tol=self.tol,
             empty_except=Empty,
             timeout=self.timeout,
             max_dur=self.max_dur,
@@ -345,7 +350,16 @@ class RiskPropagation(BaseActorSystem):
         adj = [unique(adj.get(n, EMPTY)) for n in range(self._scores)]
         membership = self.partition(adj)
         graph.update((n, node(ne, membership[n])) for n, ne in enumerate(adj))
-        self._logger.info(dumps({'GraphSizeInMb': round(get_mb(graph), 4)}))
+        self._logger.info(dumps({
+            'GraphSizeInMb': round_float(get_mb(graph)),
+            'TimeBufferInSec': self.time_buffer,
+            'Transmission': self.transmission,
+            'SendTolerance': self.tol,
+            'Partitions': self.parts,
+            'TimeoutInSec': self.timeout,
+            'MaxDurationInSec': self.max_dur,
+            'EarlyStop': self.early_stop
+        }))
         return graph, membership
 
     def partition(self, adj: NpSeq) -> ndarray:
