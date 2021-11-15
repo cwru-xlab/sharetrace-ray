@@ -46,7 +46,7 @@ def ckey(n1, n2) -> Tuple[Any, Any]:
 
 
 def round_float(val):
-    return round(float(val), 4)
+    return val if val is None else round(float(val), 4)
 
 
 class StopCondition(Enum):
@@ -353,11 +353,11 @@ class RiskPropagation(BaseActorSystem):
         self._logger.info(dumps({
             'GraphSizeInMb': round_float(get_mb(graph)),
             'TimeBufferInSec': self.time_buffer,
-            'Transmission': self.transmission,
-            'SendTolerance': self.tol,
+            'Transmission': round_float(self.transmission),
+            'SendTolerance': round_float(self.tol),
             'Partitions': self.parts,
-            'TimeoutInSec': self.timeout,
-            'MaxDurationInSec': self.max_dur,
+            'TimeoutInSec': round_float(self.timeout),
+            'MaxDurationInSec': round_float(self.max_dur),
             'EarlyStop': self.early_stop
         }))
         return graph, membership
@@ -417,6 +417,7 @@ class RayRiskPropagation(RiskPropagation):
             time_buffer=self.time_buffer,
             time_const=self.time_const,
             transmission=self.transmission,
+            tol=self.tol,
             empty_except=RayEmpty,
             timeout=self.timeout,
             max_dur=self.max_dur,
