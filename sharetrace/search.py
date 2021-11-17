@@ -1,40 +1,32 @@
+import itertools
+import json
+import logging
 from abc import ABC, abstractmethod
 from enum import Enum
-from itertools import combinations
-from json import dumps
-from logging import getLogger
-from logging.config import dictConfig
-from typing import (
-    Any, Dict, Iterable, Optional, Sequence, Tuple
-)
+from logging import config
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
-from joblib import Parallel, delayed
-from numpy import (
-    arange, array, column_stack, concatenate, ndarray, repeat, sort,
-    timedelta64, unique, void, vstack
-)
-from numpy.random import default_rng
-from pyproj import Proj, Transformer
-from scipy.spatial import KDTree
-from sklearn.neighbors import BallTree
+import joblib
+import numpy as np
+import pyproj
+from scipy import spatial
 
-from sharetrace.model import contact, event, to_coord
-from sharetrace.util import LOGGING_CONFIG, Timer
+from sharetrace import model, util
+from sharetrace.util import LOGGING_CONFIG
 
-Locations = Histories = Sequence[void]
-Contacts = ndarray
-Pairs = Iterable[Tuple[void, void]]
+Locations = Histories = Sequence[np.void]
+Contacts = np.ndarray
+Pairs = Iterable[Tuple[np.void, np.void]]
 
-rng = default_rng()
+rng = np.random.default_rng()
 EMPTY = ()
 
-dictConfig(LOGGING_CONFIG)
+logging.config.dictConfig(LOGGING_CONFIG)
 
 
 class Kind(Enum):
     BRUTE = 'brute'
     KD_TREE = 'kd_tree'
-    BALL_TREE = 'ball_tree'
 
 
 class BaseContactSearch(ABC):
@@ -60,14 +52,14 @@ class BruteContactSearch(BaseContactSearch):
     def __init__(self, min_dur: float = 0, workers: int = 1):
         super().__init__(min_dur, workers)
         self.kind = Kind.BRUTE
-        self._min_dur = timedelta64(int(min_dur * 1e6), 'us')
-        self._logger = getLogger(__name__)
+        self._min_dur = np.timedelta64(int(min_dur * 1e6), 'us')
+        self._logger = logging.getLogger(__name__)
 
     def search(self, histories: Histories) -> Contacts:
-        timer = Timer.time(lambda: self._search(histories))
+        timer = util.time(lambda: self._search(histories))
         result = timer.result
         stats = self.stats(len(histories), len(result), timer.seconds)
-        self._logger.info(dumps(stats))
+        self._logger.info(json.dumps(stats))
         return result
 
     def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
@@ -81,30 +73,30 @@ class BruteContactSearch(BaseContactSearch):
 
     def _search(self, histories: Histories) -> Contacts:
         pairs = self.pairs(histories)
-        par = Parallel(n_jobs=self.workers)
-        contacts = par(delayed(self._find_contact)(*p) for p in pairs)
-        contacts = array([c for c in contacts if c is not None])
+        par = joblib.Parallel(n_jobs=self.workers)
+        contacts = par(joblib.delayed(self._find_contact)(*p) for p in pairs)
+        contacts = np.array([c for c in contacts if c is not None])
         return contacts
 
     def pairs(self, histories: Histories) -> Pairs:
-        return combinations(histories, 2)
+        return itertools.combinations(histories, 2)
 
-    def _find_contact(self, h1: void, h2: void) -> Optional[ndarray]:
+    def _find_contact(self, h1: np.void, h2: np.void) -> Optional[np.ndarray]:
         found = None
         name1, name2 = h1['name'], h2['name']
         if name1 != name2:
             events = self._find(h1['locs'], 0, h2['locs'], 0)
             if len(events) > 0:
-                found = contact((name1, name2), events)
+                found = model.contact((name1, name2), events)
         return found
 
     def _find(
             self,
-            locs1: ndarray,
+            locs1: np.ndarray,
             i1: int,
-            locs2: ndarray,
+            locs2: np.ndarray,
             i2: int
-    ) -> Sequence[ndarray]:
+    ) -> Sequence[np.ndarray]:
         events = []
         later, create_event, find, add_events = (
             self._later, self._event, self._find, events.extend)
@@ -137,18 +129,19 @@ class BruteContactSearch(BaseContactSearch):
             add_events(create_event(start, loc1, loc2))
         return events
 
-    def _event(self, start, loc1: void, loc2: void) -> Iterable[ndarray]:
+    def _event(
+            self, start, loc1: np.void, loc2: np.void) -> Iterable[np.ndarray]:
         end = self._earlier(loc1, loc2)
         dur = end - start
-        return [event(start, dur)] if dur >= self._min_dur else EMPTY
+        return [model.event(start, dur)] if dur >= self._min_dur else EMPTY
 
     @staticmethod
-    def _later(loc1: void, loc2: void) -> float:
+    def _later(loc1: np.void, loc2: np.void) -> float:
         t1, t2 = loc1['time'], loc2['time']
         return t1 if t1 > t2 else t2
 
     @staticmethod
-    def _earlier(loc1: void, loc2: void) -> float:
+    def _earlier(loc1: np.void, loc2: np.void) -> float:
         t1, t2 = loc1['time'], loc2['time']
         return t1 if t1 < t2 else t2
 
@@ -169,12 +162,12 @@ class TreeContactSearch(BruteContactSearch):
     def pairs(self, histories: Histories) -> Pairs:
         locs = self.to_coordinates(histories)
         idx = self.index(locs)
-        pairs = self.query_pairs(concatenate(locs))
+        pairs = self.query_pairs(np.concatenate(locs))
         return self.filter(pairs, idx, histories)
 
     def to_coordinates(self, hists: Histories) -> Histories:
-        par = Parallel(self.workers)
-        return par(delayed(self._to_coordinates)(h) for h in hists)
+        par = joblib.Parallel(self.workers)
+        return par(joblib.delayed(self._to_coordinates)(h) for h in hists)
 
     def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
         stats = super().stats(n, contacts, runtime)
@@ -182,43 +175,22 @@ class TreeContactSearch(BruteContactSearch):
         return stats
 
     @staticmethod
-    def index(locations: Locations) -> ndarray:
-        idx = arange(len(locations))
+    def index(locations: Locations) -> np.ndarray:
+        idx = np.arange(len(locations))
         repeats = [len(locs) for locs in locations]
-        return repeat(idx, repeats)
+        return np.repeat(idx, repeats)
 
-    def query_pairs(self, locs: ndarray) -> ndarray:
+    def query_pairs(self, locs: np.ndarray) -> np.ndarray:
         raise NotImplementedError
 
     @staticmethod
-    def filter(pairs: ndarray, idx: ndarray, hists: Histories) -> Pairs:
-        selected = unique(idx[pairs], axis=0)
+    def filter(pairs: np.ndarray, idx: np.ndarray, hists: Histories) -> Pairs:
+        selected = np.unique(idx[pairs], axis=0)
         return ((hists[h1], hists[h2]) for (h1, h2) in selected if h1 != h2)
 
     @staticmethod
-    def _to_coordinates(hist: ndarray) -> ndarray:
-        return vstack([to_coord(loc)['loc'] for loc in hist['locs']])
-
-
-class BallTreeContactSearch(TreeContactSearch):
-    __slots__ = ()
-
-    def __init__(
-            self,
-            min_dur: float = 0,
-            workers: int = 1,
-            r: float = 1e-4,
-            leaf_size: int = 10):
-        super().__init__(min_dur, workers, r, leaf_size)
-        self.kind = Kind.BALL_TREE
-
-    def query_pairs(self, locs: ndarray) -> ndarray:
-        ball_tree = BallTree(locs, self.leaf_size, 'haversine')
-        points = ball_tree.query_radius(locs, self.r)
-        idx = self.index(points)
-        points = concatenate(points)
-        # Sorting along the last axis ensures duplicate pairs are removed.
-        return sort(column_stack((idx, points)))
+    def _to_coordinates(hist: np.ndarray) -> np.ndarray:
+        return np.vstack([model.to_coord(loc)['loc'] for loc in hist['locs']])
 
 
 class KdTreeContactSearch(TreeContactSearch):
@@ -237,9 +209,9 @@ class KdTreeContactSearch(TreeContactSearch):
         self.eps = eps
         self.p = p
 
-    def query_pairs(self, locs: ndarray) -> ndarray:
+    def query_pairs(self, locs: np.ndarray) -> np.ndarray:
         locs = self._project(locs)
-        kd_tree = KDTree(locs, self.leaf_size)
+        kd_tree = spatial.KDTree(locs, self.leaf_size)
         return kd_tree.query_pairs(self.r, self.p, self.eps, 'ndarray')
 
     def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
@@ -248,7 +220,7 @@ class KdTreeContactSearch(TreeContactSearch):
         return stats
 
     @staticmethod
-    def _project(coordinates: ndarray) -> ndarray:
+    def _project(coordinates: np.ndarray) -> np.ndarray:
         """Project from latitude-longitude to x-y Cartesian coordinates.
 
             References:
@@ -261,7 +233,8 @@ class KdTreeContactSearch(TreeContactSearch):
                 A (N, 2) numpy array of x-y Cartesian pairs.
         """
         lats, longs = coordinates.T
-        ecef = Proj(proj='geocent', ellps='WGS84', datum='WGS84')
-        lla = Proj(proj='latlong', ellps='WGS84', datum='WGS84')
-        transformer = Transformer.from_proj(lla, ecef)
-        return column_stack(transformer.transform(longs, lats, radians=False))
+        ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+        lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+        transformer = pyproj.Transformer.from_proj(lla, ecef)
+        projected = transformer.transform(longs, lats, radians=False)
+        return np.column_stack(projected)

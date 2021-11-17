@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 from inspect import isgetsetdescriptor, ismemberdescriptor
-from logging import INFO
+from logging import FileHandler, INFO
 from sys import getsizeof, stdout
 from timeit import default_timer
 from typing import Any, Callable, Union
@@ -12,17 +13,24 @@ from numpy import datetime64, ndarray, timedelta64, void
 TimeDelta = Union[timedelta, timedelta64]
 DateTime = Union[datetime, datetime64]
 
+NOW = round(datetime.utcnow().timestamp())
+
 LOGGING_CONFIG = {
     'version': 1,
     'loggers': {
         'root': {
             'level': INFO,
-            'handlers': ['console']
+            'handlers': ['console', 'file']
         },
         'console': {
             'level': INFO,
             'handlers': ['console'],
             'propagate': False
+        },
+        'file': {
+            'level': INFO,
+            'handlers': ['file'],
+            'propagate': False,
         }
     },
     'handlers': {
@@ -31,6 +39,12 @@ LOGGING_CONFIG = {
             'level': INFO,
             'formatter': 'default',
             'stream': stdout,
+        },
+        'file': {
+            'class': 'sharetrace.util.RandomFileHandler',
+            'level': INFO,
+            'formatter': 'default',
+            'args': ('logs', 'a'),
         }
     },
     'formatters': {
@@ -39,6 +53,19 @@ LOGGING_CONFIG = {
         }
     }
 }
+
+
+class RandomFileHandler(FileHandler):
+
+    def __init__(self, args):
+        path, mode = args
+        if not os.path.exists(path):
+            os.mkdir(path)
+        super().__init__(f'{path}//{NOW}.log', mode)
+
+
+def time(func: Callable[[], Any]) -> Timer:
+    return Timer.time(func)
 
 
 class Timer:

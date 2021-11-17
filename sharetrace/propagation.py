@@ -1,47 +1,44 @@
+import collections
 import datetime
-from collections import defaultdict, deque
+import functools
+import itertools
+import json
+import logging
+import queue
+import time
+import timeit
 from enum import Enum
-from functools import reduce
-from itertools import product
-from json import dumps
-from logging import getLogger
-from logging.config import dictConfig
-from queue import Empty
-from time import sleep
-from timeit import default_timer
+from logging import config
 from typing import (
-    Any, Dict, Hashable, Iterable, Mapping, MutableMapping, NoReturn, Optional,
-    Sequence, Tuple, Type
+    Any, Dict, Hashable, Iterable, Mapping, MutableMapping, NoReturn,
+    Optional, Sequence, Tuple, Type
 )
 
+import numpy as np
+import pymetis
 import ray
-from numpy import (
-    argmax, array, clip, inf, log, mean, ndarray, sort, std,
-    timedelta64, unique, void
-)
-from pymetis import part_graph
+from lewicki.lewicki.actors import BaseActor, BaseActorSystem
 from ray import ObjectRef
 from ray.util.queue import Empty as RayEmpty, Queue as RayQueue
 
-from lewicki.actors import BaseActor, BaseActorSystem
-from sharetrace.model import message, node, risk_score
-from sharetrace.util import LOGGING_CONFIG, Timer, get_mb
+from sharetrace import model, util
+from sharetrace.util import LOGGING_CONFIG
 
-NpSeq = Sequence[ndarray]
-NpMap = Mapping[int, ndarray]
+NpSeq = Sequence[np.ndarray]
+NpMap = Mapping[int, np.ndarray]
 Graph = Mapping[Hashable, Any]
 MutableGraph = MutableMapping[Hashable, Any]
-Nodes = Mapping[int, void]
+Nodes = Mapping[int, np.void]
 
 ACTOR_SYSTEM = -1
-DAY = timedelta64(1, 'D')
+DAY = np.timedelta64(1, 'D')
 EMPTY = ()
 # This is only used for comparison. Cannot use exactly 0 with log.
-DEFAULT_SCORE = risk_score(0, datetime.datetime.min)
-dictConfig(LOGGING_CONFIG)
+DEFAULT_SCORE = model.risk_score(0, datetime.datetime.min)
+config.dictConfig(LOGGING_CONFIG)
 
 
-def ckey(n1, n2) -> Tuple[Any, Any]:
+def ckey(n1, n2) -> Tuple:
     return min(n1, n2), max(n1, n2)
 
 
@@ -91,7 +88,7 @@ class Partition(BaseActor):
             early_stop: Optional[int] = None):
         super().__init__(name, inbox)
         self.graph = graph
-        self.time_buffer = timedelta64(time_buffer, 's')
+        self.time_buffer = np.timedelta64(time_buffer, 's')
         self.time_const = time_const
         self.transmission = transmission
         self.tol = tol
@@ -99,7 +96,7 @@ class Partition(BaseActor):
         self.empty_except = empty_except
         self.max_dur = max_dur
         self.early_stop = early_stop
-        self._local = deque()
+        self._local = collections.deque()
         self._nodes: Nodes = {}
         self._start = -1
         self._since_update = 0
@@ -107,10 +104,10 @@ class Partition(BaseActor):
         self._timed_out = False
         self._msgs = 0
         self._stop_condition: Tuple[StopCondition, float] = tuple()
-        self._logger = getLogger(__name__)
+        self._logger = logging.getLogger(__name__)
 
     def run(self) -> Optional[Mapping[int, float]]:
-        timed = Timer.time(self._run)
+        timed = util.time(self._run)
         results = {n: props['curr'] for n, props in self._nodes.items()}
         self._log_stats(timed.seconds)
         return self.on_complete(results)
@@ -120,29 +117,29 @@ class Partition(BaseActor):
             return 0 if len(values) == 0 else round_float(func(values))
 
         nodes, (condition, data) = self._nodes, self._stop_condition
-        update = array([
+        update = np.array([
             props['curr'] - props['init_val'] for props in nodes.values()])
         update = update[update != 0]
-        updates = array([props['updates'] for props in nodes.values()])
+        updates = np.array([props['updates'] for props in nodes.values()])
         updates = updates[updates != 0]
         logged = {
             'Partition': self.name,
             'RuntimeInSec': round_float(runtime),
             'Messages': self._msgs,
             'Nodes': len(nodes),
-            'NodeDataInMb': round_float(get_mb(nodes)),
+            'NodeDataInMb': round_float(util.get_mb(nodes)),
             'Updates': len(updates),
             'StopCondition': condition.name,
             'StopData': data}
         data = ((update, '{}Update'), (updates, '{}Updates'))
-        funcs = ((min, 'Min'), (max, 'Max'), (mean, 'Avg'), (std, 'Std'))
-        for (datum, name), (f, fname) in product(data, funcs):
+        funcs = ((min, 'Min'), (max, 'Max'), (np.mean, 'Avg'), (np.std, 'Std'))
+        for (datum, name), (f, fname) in itertools.product(data, funcs):
             logged[name.format(fname)] = safe_stat(f, datum)
-        self._logger.info(dumps(logged))
+        self._logger.info(json.dumps(logged))
 
     def _run(self):
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
-        self._start = default_timer()
+        self._start = timeit.default_timer()
         self._on_initial(receive())
         while not stop():
             if (msg := receive()) is not None:
@@ -155,7 +152,7 @@ class Partition(BaseActor):
     def should_stop(self) -> bool:
         too_long, no_updates = False, False
         if (max_dur := self.max_dur) is not None:
-            if too_long := ((default_timer() - self._start) >= max_dur):
+            if too_long := ((timeit.default_timer() - self._start) >= max_dur):
                 self._stop_condition = (StopCondition.MAX_DURATION, max_dur)
         if (early_stop := self.early_stop) is not None:
             if no_updates := (self._since_update >= early_stop):
@@ -176,16 +173,16 @@ class Partition(BaseActor):
         self._msgs += msg is not None
         return msg
 
-    def on_next(self, msg: void) -> NoReturn:
+    def on_next(self, msg: np.void) -> NoReturn:
         """Update the variable node and send messages to neighbors."""
         factor, var, score = msg['src'], msg['dest'], msg['val']
         # As a variable node, update its current value.
         self._update(var, score)
         # As factor nodes, send a message to each neighboring variable node.
         factors = self.graph[var]['ne']
-        self._send(array([score]), var, factors[factor != factors])
+        self._send(np.array([score]), var, factors[factor != factors])
 
-    def _update(self, var: int, score: void) -> NoReturn:
+    def _update(self, var: int, score: np.void) -> NoReturn:
         """Update the exposure score of the current variable node."""
         if (new := score['val']) > (props := self._nodes[var])['curr']:
             self._since_update = 0
@@ -199,7 +196,7 @@ class Partition(BaseActor):
         # contiguous, based on the original input scores.
         nodes = {}
         for var, vscores in scores.items():
-            init = sort(vscores, order=('val', 'time'))[-1]
+            init = np.sort(vscores, order=('val', 'time'))[-1]
             init_msg = init.copy()
             init_msg['val'] *= self.transmission
             nodes[var] = {
@@ -214,7 +211,7 @@ class Partition(BaseActor):
             send(vscores, var, graph[var]['ne'])
         self._init_done = True
 
-    def _send(self, scores: ndarray, var: int, factors: ndarray):
+    def _send(self, scores: np.ndarray, var: int, factors: np.ndarray):
         """Compute a factor node message and send if it will be effective."""
         graph, init, sgroup, send, buffer, tol, const, transmission = (
             self.graph, self._nodes[var]['init_msg'], self.name, self.send,
@@ -225,10 +222,10 @@ class Partition(BaseActor):
             scores = scores[scores['time'] <= ctime + buffer]
             if len(scores) > 0:
                 # Scales time deltas in partial days.
-                diff = clip((scores['time'] - ctime) / DAY, -inf, 0)
+                diff = np.clip((scores['time'] - ctime) / DAY, -np.inf, 0)
                 # Use the log transform to avoid overflow issues.
-                weighted = log(scores['val']) + (diff / const)
-                score = scores[argmax(weighted)]
+                weighted = np.log(scores['val']) + (diff / const)
+                score = scores[np.argmax(weighted)]
                 score['val'] *= transmission
                 # This is a necessary, but not sufficient, condition for the
                 # value of a neighbor to be updated. The transmission rate
@@ -244,7 +241,8 @@ class Partition(BaseActor):
                 # The conjunction of the first criterion allows for convergence.
                 older = score['time'] < init['time']
                 if high_enough and older:
-                    send(message(score, var, sgroup, f, graph[f]['group']))
+                    dgroup = graph[f]['group']
+                    send(model.message(score, var, sgroup, f, dgroup))
 
     def send(self, msg: Any, key: int = None) -> NoReturn:
         """Send a message either to the local inbox or an outbox."""
@@ -291,7 +289,7 @@ class RiskPropagation(BaseActorSystem):
         self.max_dur = max_dur
         self.early_stop = early_stop
         self._scores: int = -1
-        self._logger = getLogger(__name__)
+        self._logger = logging.getLogger(__name__)
 
     def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
         self._scores = len(scores)
@@ -300,14 +298,14 @@ class RiskPropagation(BaseActorSystem):
         groups = self._group(scores, membership)
         self.send(*groups)
 
-    def run(self) -> ndarray:
+    def run(self) -> np.ndarray:
         super().run()
         receive = self.receive
         return self._map((receive() for _ in range(self.parts)))
 
-    def _map(self, results: Iterable[Dict]) -> ndarray:
-        results = reduce(lambda d1, d2: {**d1, **d2}, results)
-        return array([results[i] for i in range(self._scores)])
+    def _map(self, results: Iterable[Dict]) -> np.ndarray:
+        results = functools.reduce(lambda d1, d2: {**d1, **d2}, results)
+        return np.array([results[i] for i in range(self._scores)])
 
     def _connect(self, graph: Graph) -> NoReturn:
         create = self.create_partition
@@ -321,7 +319,7 @@ class RiskPropagation(BaseActorSystem):
             time_const=self.time_const,
             transmission=self.transmission,
             tol=self.tol,
-            empty_except=Empty,
+            empty_except=queue.Empty,
             timeout=self.timeout,
             max_dur=self.max_dur,
             early_stop=self.early_stop)
@@ -337,9 +335,9 @@ class RiskPropagation(BaseActorSystem):
         for p, pnodes in enumerate(nodes):
             outbox[p].put(pnodes, block=True)
 
-    def create_graph(self, contacts: NpSeq) -> Tuple[Graph, ndarray]:
+    def create_graph(self, contacts: NpSeq) -> Tuple[Graph, np.ndarray]:
         graph: MutableGraph = {}
-        adj = defaultdict(list)
+        adj = collections.defaultdict(list)
         # Assumes a name corresponds to an index in scores.
         for contact in contacts:
             n1, n2 = contact['names']
@@ -347,24 +345,23 @@ class RiskPropagation(BaseActorSystem):
             adj[n2].append(n1)
             graph[ckey(n1, n2)] = contact['time']
         # Keep indexing consistent in case of users that have no contacts.
-        adj = [unique(adj.get(n, EMPTY)) for n in range(self._scores)]
-        membership = self.partition(adj)
-        graph.update((n, node(ne, membership[n])) for n, ne in enumerate(adj))
-        self._logger.info(dumps({
-            'GraphSizeInMb': round_float(get_mb(graph)),
+        adj = [np.unique(adj.get(n, EMPTY)) for n in range(self._scores)]
+        labels = self.partition(adj)
+        graph.update((n, model.node(ne, labels[n])) for n, ne in enumerate(adj))
+        self._logger.info(json.dumps({
+            'GraphSizeInMb': round_float(util.get_mb(graph)),
             'TimeBufferInSec': self.time_buffer,
             'Transmission': round_float(self.transmission),
             'SendTolerance': round_float(self.tol),
             'Partitions': self.parts,
             'TimeoutInSec': round_float(self.timeout),
             'MaxDurationInSec': round_float(self.max_dur),
-            'EarlyStop': self.early_stop
-        }))
-        return graph, membership
+            'EarlyStop': self.early_stop}))
+        return graph, labels
 
-    def partition(self, adj: NpSeq) -> ndarray:
-        cuts, membership = part_graph(self.parts, adj)
-        return membership
+    def partition(self, adj: NpSeq) -> np.ndarray:
+        cuts, labels = pymetis.part_graph(self.parts, adj)
+        return labels
 
 
 class RayPartition(Partition):
@@ -393,7 +390,7 @@ class _RayPartition(Partition):
     def run(self) -> Optional[Mapping[int, float]]:
         result = super().run()
         # Allow the last partition output its log.
-        sleep(0.1)
+        time.sleep(0.1)
         return result
 
     def on_complete(self, results):
@@ -423,7 +420,7 @@ class RayRiskPropagation(RiskPropagation):
             max_dur=self.max_dur,
             early_stop=self.early_stop)
 
-    def create_graph(self, contacts: NpSeq) -> Tuple[ObjectRef, ndarray]:
+    def create_graph(self, contacts: NpSeq) -> Tuple[ObjectRef, np.ndarray]:
         graph, membership = super().create_graph(contacts)
         return ray.put(graph), membership
 
