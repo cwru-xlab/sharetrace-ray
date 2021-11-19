@@ -24,16 +24,11 @@ def walk(
         step_high: float = 0.1,
         xinit: float = 0,
         yinit: float = 0):
-    def step(pos, idx, dim):
-        delta = rng.uniform(step_low, step_high)
-        pos[dim][idx] = np.clip(pos[dim][idx - 1] + delta, low, high)
-
     xy = np.zeros((2, n))
-    xy[0][0] = np.clip(xinit, low, high)
-    xy[1][0] = np.clip(yinit, low, high)
+    xy[:, 0] = np.clip((xinit, yinit), low, high)
+    delta = rng.uniform(step_low, step_high, size=(2, n))
     for i in range(1, n):
-        step(xy, i, 0)
-        step(xy, i, 1)
+        xy[:, i] = np.clip(xy[:, i - 1] + delta[:, i], low, high)
     return xy
 
 
@@ -129,7 +124,7 @@ def save_times(times):
     np.save(TIMES_FILENAME, times)
 
 
-def load_times():
+def load_times(n=None):
     return load(TIMES_FILENAME, n)
 
 
