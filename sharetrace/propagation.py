@@ -8,7 +8,6 @@ import queue
 import time
 import timeit
 from enum import Enum
-from logging import config
 from typing import (
     Any, Collection, Hashable, Iterable, Mapping, MutableMapping,
     NoReturn, Optional, Sequence, Tuple, Type
@@ -22,7 +21,6 @@ from ray.util.queue import Empty as RayEmpty, Queue as RayQueue
 
 from lewicki.lewicki.actors import BaseActor, BaseActorSystem
 from sharetrace import model, util
-from sharetrace.util import LOGGING_CONFIG
 
 NpSeq = Sequence[np.ndarray]
 NpMap = Mapping[int, np.ndarray]
@@ -36,9 +34,6 @@ EMPTY = ()
 # This is only used for comparison. Cannot use exactly 0 with log.
 DEFAULT_SCORE = model.risk_score(0, datetime.datetime.min)
 
-logging.config.dictConfig(LOGGING_CONFIG)
-logger = logging.getLogger()
-
 
 def ckey(n1, n2) -> Tuple:
     return min(n1, n2), max(n1, n2)
@@ -48,12 +43,6 @@ class StopCondition(Enum):
     EARLY_STOP = 'early_stop'
     TIMED_OUT = 'timed_out'
     MAX_DURATION = 'max_duration'
-
-
-class Impl(Enum):
-    SERIAL = 'serial'
-    LEWICKI = 'lewicki'
-    RAY = 'ray'
 
 
 class Partition(BaseActor):
@@ -265,14 +254,15 @@ class RiskPropagation(BaseActorSystem):
         'transmission',
         'tol',
         'parts',
+        'logger',
         'timeout',
         'max_dur',
         'early_stop',
-        'impl',
         '_scores')
 
     def __init__(
             self,
+            logger: logging.Logger,
             time_buffer: int = 172_800,
             time_const: float = 1.,
             transmission: float = 0.8,
@@ -283,6 +273,7 @@ class RiskPropagation(BaseActorSystem):
             early_stop: Optional[int] = None,
             inbox: Optional[Any] = None):
         super().__init__(ACTOR_SYSTEM, inbox)
+        self.logger = logger
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
@@ -291,7 +282,6 @@ class RiskPropagation(BaseActorSystem):
         self.timeout = timeout
         self.max_dur = max_dur
         self.early_stop = early_stop
-        self.impl = Impl.LEWICKI if parts > 1 else Impl.SERIAL
         self._scores: int = -1
 
     def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
@@ -308,7 +298,7 @@ class RiskPropagation(BaseActorSystem):
 
     def _handle(self, data: Collection) -> np.ndarray:
         for log in (log for _, log in data):
-            logger.info(log)
+            self.logger.info(log)
         results = (res for res, _ in data)
         data = functools.reduce(lambda d1, d2: {**d1, **d2}, results)
         return np.array([data[i] for i in range(self._scores)])
@@ -354,8 +344,7 @@ class RiskPropagation(BaseActorSystem):
         adj = [np.unique(adj.get(n, EMPTY)) for n in range(self._scores)]
         labels = self.partition(adj)
         graph.update((n, model.node(ne, labels[n])) for n, ne in enumerate(adj))
-        logger.info(json.dumps({
-            'Implementation': self.impl.name,
+        self.logger.info(json.dumps({
             'GraphSizeInMb': util.approx(util.get_mb(graph)),
             'TimeBufferInSec': self.time_buffer,
             'Transmission': util.approx(self.transmission),
@@ -411,7 +400,6 @@ class RayRiskPropagation(RiskPropagation):
     def __init__(self, *args, **kwargs):
         # Actor system does not need an inbox None uses multiprocessing.Queue.
         super().__init__(*args, inbox=EMPTY, **kwargs)
-        self.impl = Impl.RAY if self.parts > 1 else Impl.SERIAL
 
     def create_partition(self, name: Hashable, graph: ObjectRef) -> Partition:
         # Ray Queue must be created and then passed as an object reference.

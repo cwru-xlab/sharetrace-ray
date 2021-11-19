@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import inspect
 import logging
+import os
 import sys
 import timeit
 from typing import Any, Callable, Union
@@ -14,34 +15,55 @@ DateTime = Union[datetime.datetime, np.datetime64]
 
 NOW = round(datetime.datetime.utcnow().timestamp())
 
-LOGGING_CONFIG = {
-    'version': 1,
-    'loggers': {
-        'root': {
-            'level': logging.INFO,
-            'handlers': ['console', 'file']
-        }
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'level': logging.INFO,
-            'formatter': 'default',
-            'stream': sys.stdout,
+LOGS_DIR = 'logs'
+LOGGERS = (
+    'contact-search',
+    'propagation-serial',
+    'propagation-lewicki',
+    'propagation-ray',
+    'propagation-100:1900',
+    'propagation-2000:3900',
+    'propagation-4000:5900',
+    'propagation-6000:7900',
+    'propagation-8000:10000')
+
+
+def logging_config():
+    if not os.path.exists(LOGS_DIR):
+        os.mkdir(LOGS_DIR)
+
+    config = {
+        'version': 1,
+        'loggers': {
+            'root': {
+                'level': logging.INFO,
+                'handlers': ['console']
+            }
         },
-        'file': {
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'level': logging.INFO,
+                'formatter': 'default',
+                'stream': sys.stdout,
+            }
+        },
+        'formatters': {
+            'default': {
+                'format': '%(asctime)s %(levelname)s %(module)s | %(message)s'
+            }
+        }
+    }
+    for logger in LOGGERS:
+        config['loggers'][logger] = {
+            'level': logging.INFO,
+            'handlers': [logger]}
+        config['handlers'][logger] = {
             'class': 'logging.FileHandler',
             'level': logging.INFO,
             'formatter': 'default',
-            'filename': 'sharetrace.log',
-        }
-    },
-    'formatters': {
-        'default': {
-            'format': '%(asctime)s %(levelname)s %(module)s | %(message)s'
-        }
-    }
-}
+            'filename': f'{LOGS_DIR}//{logger}.log'}
+    return config
 
 
 def time(func: Callable[[], Any]) -> Timer:
