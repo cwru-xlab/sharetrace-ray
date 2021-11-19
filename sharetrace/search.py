@@ -22,6 +22,7 @@ rng = np.random.default_rng()
 EMPTY = ()
 
 logging.config.dictConfig(LOGGING_CONFIG)
+logger = logging.getLogger()
 
 
 class Kind(Enum):
@@ -47,25 +48,24 @@ class BaseContactSearch(ABC):
 
 
 class BruteContactSearch(BaseContactSearch):
-    __slots__ = ('kind', '_min_dur', '_logger')
+    __slots__ = ('kind', '_min_dur')
 
     def __init__(self, min_dur: float = 0, workers: int = 1):
         super().__init__(min_dur, workers)
         self.kind = Kind.BRUTE
         self._min_dur = np.timedelta64(int(min_dur * 1e6), 'us')
-        self._logger = logging.getLogger(__name__)
 
     def search(self, histories: Histories) -> Contacts:
         timer = util.time(lambda: self._search(histories))
         result = timer.result
         stats = self.stats(len(histories), len(result), timer.seconds)
-        self._logger.info(json.dumps(stats))
+        logger.info(json.dumps(stats))
         return result
 
     def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
         return {
             'Kind': self.kind.name,
-            'RuntimeInSec': round(runtime, 4),
+            'RuntimeInSec': util.approx(runtime),
             'Workers': self.workers,
             'MinDurationInSec': self.min_dur,
             'Input': n,

@@ -10,17 +10,17 @@ import timeit
 from enum import Enum
 from logging import config
 from typing import (
-    Any, Dict, Hashable, Iterable, Mapping, MutableMapping, NoReturn,
-    Optional, Sequence, Tuple, Type
+    Any, Collection, Hashable, Iterable, Mapping, MutableMapping,
+    NoReturn, Optional, Sequence, Tuple, Type
 )
 
 import numpy as np
 import pymetis
 import ray
-from lewicki.lewicki.actors import BaseActor, BaseActorSystem
 from ray import ObjectRef
 from ray.util.queue import Empty as RayEmpty, Queue as RayQueue
 
+from lewicki.lewicki.actors import BaseActor, BaseActorSystem
 from sharetrace import model, util
 from sharetrace.util import LOGGING_CONFIG
 
@@ -35,21 +35,25 @@ DAY = np.timedelta64(1, 'D')
 EMPTY = ()
 # This is only used for comparison. Cannot use exactly 0 with log.
 DEFAULT_SCORE = model.risk_score(0, datetime.datetime.min)
-config.dictConfig(LOGGING_CONFIG)
+
+logging.config.dictConfig(LOGGING_CONFIG)
+logger = logging.getLogger()
 
 
 def ckey(n1, n2) -> Tuple:
     return min(n1, n2), max(n1, n2)
 
 
-def round_float(val):
-    return val if val is None else round(float(val), 4)
-
-
 class StopCondition(Enum):
     EARLY_STOP = 'early_stop'
     TIMED_OUT = 'timed_out'
     MAX_DURATION = 'max_duration'
+
+
+class Impl(Enum):
+    SERIAL = 'serial'
+    LEWICKI = 'lewicki'
+    RAY = 'ray'
 
 
 class Partition(BaseActor):
@@ -70,8 +74,7 @@ class Partition(BaseActor):
         '_init_done',
         '_timed_out',
         '_stop_condition',
-        '_msgs',
-        '_logger')
+        '_msgs')
 
     def __init__(
             self,
@@ -104,17 +107,16 @@ class Partition(BaseActor):
         self._timed_out = False
         self._msgs = 0
         self._stop_condition: Tuple[StopCondition, float] = tuple()
-        self._logger = logging.getLogger(__name__)
 
     def run(self) -> Optional[Mapping[int, float]]:
         timed = util.time(self._run)
         results = {n: props['curr'] for n, props in self._nodes.items()}
-        self._log_stats(timed.seconds)
-        return self.on_complete(results)
+        log = self._log(timed.seconds)
+        return self.on_complete(results, log)
 
-    def _log_stats(self, runtime: float):
+    def _log(self, runtime: float) -> str:
         def safe_stat(func, values):
-            return 0 if len(values) == 0 else round_float(func(values))
+            return 0 if len(values) == 0 else util.approx(func(values))
 
         nodes, (condition, data) = self._nodes, self._stop_condition
         update = np.array([
@@ -124,10 +126,10 @@ class Partition(BaseActor):
         updates = updates[updates != 0]
         logged = {
             'Partition': self.name,
-            'RuntimeInSec': round_float(runtime),
+            'RuntimeInSec': util.approx(runtime),
             'Messages': self._msgs,
             'Nodes': len(nodes),
-            'NodeDataInMb': round_float(util.get_mb(nodes)),
+            'NodeDataInMb': util.approx(util.get_mb(nodes)),
             'Updates': len(updates),
             'StopCondition': condition.name,
             'StopData': data}
@@ -135,7 +137,7 @@ class Partition(BaseActor):
         funcs = ((min, 'Min'), (max, 'Max'), (np.mean, 'Avg'), (np.std, 'Std'))
         for (datum, name), (f, fname) in itertools.product(data, funcs):
             logged[name.format(fname)] = safe_stat(f, datum)
-        self._logger.info(json.dumps(logged))
+        return json.dumps(logged)
 
     def _run(self):
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
@@ -145,9 +147,9 @@ class Partition(BaseActor):
             if (msg := receive()) is not None:
                 on_next(msg)
 
-    def on_complete(self, results) -> Optional:
-        # Must send the results of the child process via queue.
-        self.send(results, ACTOR_SYSTEM)
+    def on_complete(self, results, log) -> Optional:
+        # Must send the data of the child process via queue.
+        self.send((results, log), ACTOR_SYSTEM)
 
     def should_stop(self) -> bool:
         too_long, no_updates = False, False
@@ -216,6 +218,7 @@ class Partition(BaseActor):
         graph, init, sgroup, send, buffer, tol, const, transmission = (
             self.graph, self._nodes[var]['init_msg'], self.name, self.send,
             self.time_buffer, self.tol, self.time_const, self.transmission)
+        message = model.message
         for f in factors:
             # Only consider scores that may have been transmitted from contact.
             ctime = graph[ckey(var, f)]
@@ -231,7 +234,7 @@ class Partition(BaseActor):
                 # value of a neighbor to be updated. The transmission rate
                 # causes the value of a score to monotonically decrease as it
                 # propagates further from its source. Thus, this criterion
-                # will converge. A higher tolerance results in faster
+                # will converge. A higher tolerance data in faster
                 # convergence at the cost of completeness.
                 high_enough = score['val'] > init['val'] * tol
                 # The older the score, the likelier it is to be propagated,
@@ -242,7 +245,7 @@ class Partition(BaseActor):
                 older = score['time'] < init['time']
                 if high_enough and older:
                     dgroup = graph[f]['group']
-                    send(model.message(score, var, sgroup, f, dgroup))
+                    send(message(score, var, sgroup, f, dgroup))
 
     def send(self, msg: Any, key: int = None) -> NoReturn:
         """Send a message either to the local inbox or an outbox."""
@@ -265,8 +268,8 @@ class RiskPropagation(BaseActorSystem):
         'timeout',
         'max_dur',
         'early_stop',
-        '_scores',
-        '_logger')
+        'impl',
+        '_scores')
 
     def __init__(
             self,
@@ -288,8 +291,8 @@ class RiskPropagation(BaseActorSystem):
         self.timeout = timeout
         self.max_dur = max_dur
         self.early_stop = early_stop
+        self.impl = Impl.LEWICKI if parts > 1 else Impl.SERIAL
         self._scores: int = -1
-        self._logger = logging.getLogger(__name__)
 
     def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
         self._scores = len(scores)
@@ -301,11 +304,14 @@ class RiskPropagation(BaseActorSystem):
     def run(self) -> np.ndarray:
         super().run()
         receive = self.receive
-        return self._map((receive() for _ in range(self.parts)))
+        return self._handle([receive() for _ in range(self.parts)])
 
-    def _map(self, results: Iterable[Dict]) -> np.ndarray:
-        results = functools.reduce(lambda d1, d2: {**d1, **d2}, results)
-        return np.array([results[i] for i in range(self._scores)])
+    def _handle(self, data: Collection) -> np.ndarray:
+        for log in (log for _, log in data):
+            logger.info(log)
+        results = (res for res, _ in data)
+        data = functools.reduce(lambda d1, d2: {**d1, **d2}, results)
+        return np.array([data[i] for i in range(self._scores)])
 
     def _connect(self, graph: Graph) -> NoReturn:
         create = self.create_partition
@@ -348,14 +354,15 @@ class RiskPropagation(BaseActorSystem):
         adj = [np.unique(adj.get(n, EMPTY)) for n in range(self._scores)]
         labels = self.partition(adj)
         graph.update((n, model.node(ne, labels[n])) for n, ne in enumerate(adj))
-        self._logger.info(json.dumps({
-            'GraphSizeInMb': round_float(util.get_mb(graph)),
+        logger.info(json.dumps({
+            'Implementation': self.impl.name,
+            'GraphSizeInMb': util.approx(util.get_mb(graph)),
             'TimeBufferInSec': self.time_buffer,
-            'Transmission': round_float(self.transmission),
-            'SendTolerance': round_float(self.tol),
+            'Transmission': util.approx(self.transmission),
+            'SendTolerance': util.approx(self.tol),
             'Partitions': self.parts,
-            'TimeoutInSec': round_float(self.timeout),
-            'MaxDurationInSec': round_float(self.max_dur),
+            'TimeoutInSec': util.approx(self.timeout),
+            'MaxDurationInSec': util.approx(self.max_dur),
             'EarlyStop': self.early_stop}))
         return graph, labels
 
@@ -393,9 +400,9 @@ class _RayPartition(Partition):
         time.sleep(0.1)
         return result
 
-    def on_complete(self, results):
-        # Returns the results, as opposed to using a queue to send them.
-        return results
+    def on_complete(self, results, log):
+        # Return, as opposed to using a queue.
+        return results, log
 
 
 class RayRiskPropagation(RiskPropagation):
@@ -404,6 +411,7 @@ class RayRiskPropagation(RiskPropagation):
     def __init__(self, *args, **kwargs):
         # Actor system does not need an inbox None uses multiprocessing.Queue.
         super().__init__(*args, inbox=EMPTY, **kwargs)
+        self.impl = Impl.RAY if self.parts > 1 else Impl.SERIAL
 
     def create_partition(self, name: Hashable, graph: ObjectRef) -> Partition:
         # Ray Queue must be created and then passed as an object reference.
@@ -425,8 +433,8 @@ class RayRiskPropagation(RiskPropagation):
         return ray.put(graph), membership
 
     def run(self) -> Any:
-        # No need to use a queue since Ray actors can return results.
-        results = self._map(ray.get([a.run() for a in self.actors]))
+        # No need to use a queue since Ray actors can return data.
+        results = self._handle(ray.get([a.run() for a in self.actors]))
         ray.shutdown()
         return results
 
@@ -437,7 +445,7 @@ class RayRiskPropagation(RiskPropagation):
     def connect(self, *actors: BaseActor) -> NoReturn:
         # Connect in order to send the initial message.
         BaseActor.connect(self, *actors)
-        # Remember all actors in order to get their results.
+        # Remember all actors in order to get their data.
         self.actors.extend(actors)
         # Each partition may need to communicate with all other partitions.
         self._make_complete(*actors)

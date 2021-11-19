@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import inspect
 import logging
-import os
 import sys
 import timeit
 from typing import Any, Callable, Union
@@ -21,16 +20,6 @@ LOGGING_CONFIG = {
         'root': {
             'level': logging.INFO,
             'handlers': ['console', 'file']
-        },
-        'console': {
-            'level': logging.INFO,
-            'handlers': ['console'],
-            'propagate': False
-        },
-        'file': {
-            'level': logging.INFO,
-            'handlers': ['file'],
-            'propagate': False,
         }
     },
     'handlers': {
@@ -41,10 +30,10 @@ LOGGING_CONFIG = {
             'stream': sys.stdout,
         },
         'file': {
-            'class': 'sharetrace.util.RandomFileHandler',
+            'class': 'logging.FileHandler',
             'level': logging.INFO,
             'formatter': 'default',
-            'args': ('logs', 'a'),
+            'filename': 'sharetrace.log',
         }
     },
     'formatters': {
@@ -53,15 +42,6 @@ LOGGING_CONFIG = {
         }
     }
 }
-
-
-class RandomFileHandler(logging.FileHandler):
-
-    def __init__(self, args):
-        path, mode = args
-        if not os.path.exists(path):
-            os.mkdir(path)
-        super().__init__(f'{path}//{NOW}.log', mode)
 
 
 def time(func: Callable[[], Any]) -> Timer:
@@ -125,3 +105,7 @@ def get_bytes(obj, seen=None):
             for s in obj.__slots__
             if hasattr(obj, s))
     return size
+
+
+def approx(val):
+    return val if val is None else round(float(val), 4)
