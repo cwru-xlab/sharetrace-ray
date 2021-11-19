@@ -1,34 +1,34 @@
 from __future__ import annotations
 
+import datetime
+import inspect
+import logging
 import os
-from datetime import datetime, timedelta
-from inspect import isgetsetdescriptor, ismemberdescriptor
-from logging import FileHandler, INFO
-from sys import getsizeof, stdout
-from timeit import default_timer
+import sys
+import timeit
 from typing import Any, Callable, Union
 
-from numpy import datetime64, ndarray, timedelta64, void
+import numpy as np
 
-TimeDelta = Union[timedelta, timedelta64]
-DateTime = Union[datetime, datetime64]
+TimeDelta = Union[datetime.timedelta, np.timedelta64]
+DateTime = Union[datetime.datetime, np.datetime64]
 
-NOW = round(datetime.utcnow().timestamp())
+NOW = round(datetime.datetime.utcnow().timestamp())
 
 LOGGING_CONFIG = {
     'version': 1,
     'loggers': {
         'root': {
-            'level': INFO,
+            'level': logging.INFO,
             'handlers': ['console', 'file']
         },
         'console': {
-            'level': INFO,
+            'level': logging.INFO,
             'handlers': ['console'],
             'propagate': False
         },
         'file': {
-            'level': INFO,
+            'level': logging.INFO,
             'handlers': ['file'],
             'propagate': False,
         }
@@ -36,13 +36,13 @@ LOGGING_CONFIG = {
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'level': INFO,
+            'level': logging.INFO,
             'formatter': 'default',
-            'stream': stdout,
+            'stream': sys.stdout,
         },
         'file': {
             'class': 'sharetrace.util.RandomFileHandler',
-            'level': INFO,
+            'level': logging.INFO,
             'formatter': 'default',
             'args': ('logs', 'a'),
         }
@@ -55,7 +55,7 @@ LOGGING_CONFIG = {
 }
 
 
-class RandomFileHandler(FileHandler):
+class RandomFileHandler(logging.FileHandler):
 
     def __init__(self, args):
         path, mode = args
@@ -77,9 +77,9 @@ class Timer:
 
     @classmethod
     def time(cls, func: Callable[[], Any]) -> Timer:
-        start = default_timer()
+        start = timeit.default_timer()
         result = func()
-        stop = default_timer()
+        stop = timeit.default_timer()
         return Timer(result, stop - start)
 
 
@@ -94,10 +94,10 @@ def get_bytes(obj, seen=None):
         https://github.com/bosswissam/pysize/blob/master/pysize.py
     """
 
-    if isinstance(obj, (ndarray, void)):
+    if isinstance(obj, (np.ndarray, np.void)):
         return obj.nbytes
 
-    size = getsizeof(obj)
+    size = sys.getsizeof(obj)
     if seen is None:
         seen = set()
     obj_id = id(obj)
@@ -108,8 +108,8 @@ def get_bytes(obj, seen=None):
         for cls in obj.__class__.__mro__:
             if '__dict__' in cls.__dict__:
                 d = cls.__dict__['__dict__']
-                gs_descriptor = isgetsetdescriptor(d)
-                m_descriptor = ismemberdescriptor(d)
+                gs_descriptor = inspect.isgetsetdescriptor(d)
+                m_descriptor = inspect.ismemberdescriptor(d)
                 if gs_descriptor or m_descriptor:
                     size += get_bytes(obj.__dict__, seen)
                 break
