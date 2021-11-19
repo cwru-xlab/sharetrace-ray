@@ -3,7 +3,7 @@ from datetime import datetime
 import numpy as np
 from scipy import stats
 
-from sharetrace import model, propagation, search
+from sharetrace import model
 from sharetrace.util import DateTime
 
 rng = np.random.default_rng()
@@ -162,20 +162,3 @@ def load_histories(n=None):
 
 def load(filename, n=None):
     return np.load(filename, allow_pickle=True)[:n]
-
-
-def main():
-    n = 1000
-    histories = to_geohashes(load_histories(n))
-    scores = load_scores(n)
-    contact_search = search.KdTreeContactSearch(min_dur=900, workers=-1)
-    contacts = contact_search.search(histories)
-    for t in np.arange(0.1, 1, 0.1):
-        risk_prop = propagation.RayRiskPropagation(
-            parts=4, early_stop=10_000, tol=t, timeout=3)
-        risk_prop.setup(scores, contacts)
-        risk_prop.run()
-
-
-if __name__ == '__main__':
-    main()
