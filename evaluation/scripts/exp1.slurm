@@ -6,8 +6,8 @@
 #SBATCH --mail-user=rdt46@case.edu
 #SBATCH --mail-type=ALL
 
-EXPERIMENT = 1
-PYTHON_VERSION = "3.8.6"
+EXPERIMENT=1
+PYTHON_VERSION="3.8.6"
 
 module swap intel gcc
 module load python/$PYTHON_VERSION
