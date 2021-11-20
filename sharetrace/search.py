@@ -29,11 +29,14 @@ class BaseContactSearch(ABC):
     __slots__ = ('logger', 'min_dur', 'workers')
 
     def __init__(
-            self, logger: logging.Logger, min_dur: float = 0, workers: int = 1):
+            self,
+            min_dur: float = 0,
+            workers: int = 1,
+            logger: Optional[logging.Logger] = None):
         super().__init__()
-        self.logger = logger
         self.min_dur = min_dur
         self.workers = workers
+        self.logger = logger
 
     @abstractmethod
     def search(self, histories: Histories) -> Contacts:
@@ -48,8 +51,11 @@ class BruteContactSearch(BaseContactSearch):
     __slots__ = ('kind', '_min_dur')
 
     def __init__(
-            self, logger: logging.Logger, min_dur: float = 0, workers: int = 1):
-        super().__init__(logger, min_dur, workers)
+            self,
+            min_dur: float = 0,
+            workers: int = 1,
+            logger: Optional[logging.Logger] = None):
+        super().__init__(min_dur, workers, logger)
         self.kind = Kind.BRUTE
         self._min_dur = np.timedelta64(int(min_dur * 1e6), 'us')
 
@@ -57,7 +63,8 @@ class BruteContactSearch(BaseContactSearch):
         timer = util.time(lambda: self._search(histories))
         result = timer.result
         stats = self.stats(len(histories), len(result), timer.seconds)
-        self.logger.info(json.dumps(stats))
+        if self.logger is not None:
+            util.info(self.logger, json.dumps(stats))
         return result
 
     def stats(self, n: int, contacts: int, runtime: float) -> Dict[str, Any]:
@@ -66,7 +73,7 @@ class BruteContactSearch(BaseContactSearch):
             'RuntimeInSec': util.approx(runtime),
             'Workers': self.workers,
             'MinDurationInSec': self.min_dur,
-            'Input': n,
+            'InputSize': n,
             'Contacts': contacts}
 
     def _search(self, histories: Histories) -> Contacts:
@@ -149,12 +156,12 @@ class TreeContactSearch(BruteContactSearch):
 
     def __init__(
             self,
-            logger: logging.Logger,
             min_dur: float = 0,
             workers: int = 1,
             r: float = 1e-4,
-            leaf_size: int = 10):
-        super().__init__(logger, min_dur, workers)
+            leaf_size: int = 10,
+            logger: Optional[logging.Logger] = None):
+        super().__init__(min_dur, workers, logger)
         self.r = r
         self.leaf_size = leaf_size
 
@@ -197,14 +204,14 @@ class KdTreeContactSearch(TreeContactSearch):
 
     def __init__(
             self,
-            logger: logging.Logger,
             min_dur: float = 0,
             workers: int = 1,
             r: float = 1e-4,
             leaf_size: int = 10,
             eps: int = 1e-5,
-            p: float = 2):
-        super().__init__(logger, min_dur, workers, r, leaf_size)
+            p: float = 2,
+            logger: Optional[logging.Logger] = None):
+        super().__init__(min_dur, workers, r, leaf_size, logger)
         self.kind = Kind.KD_TREE
         self.eps = eps
         self.p = p

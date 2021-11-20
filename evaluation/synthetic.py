@@ -1,10 +1,17 @@
+import logging
+import logging
+import warnings
 from datetime import datetime
+from logging import config
 
+import joblib
 import numpy as np
 from scipy import stats
 
-from sharetrace import model
+from sharetrace import model, util
 from sharetrace.util import DateTime
+
+logging.config.dictConfig(util.logging_config())
 
 rng = np.random.default_rng()
 SEC_PER_DAY = 86400
@@ -14,6 +21,7 @@ VALUES_FILENAME = 'data//values.npy'
 SCORES_FILENAME = 'data//scores.npy'
 LOCATIONS_FILENAME = 'data//locations.npy'
 HISTORIES_FILENAME = 'data//histories.npy'
+CONTACTS_FILE_FORMAT = 'data//contacts:{}.npy'
 
 
 def walk(
@@ -87,17 +95,19 @@ def to_histories(locs, times):
 
 
 def to_geohashes(histories, prec: int = 8):
-    return np.array([model.to_geohashes(h, prec) for h in histories])
+    par = joblib.Parallel()
+    convert = joblib.delayed(model.to_geohashes)
+    return np.array(par(convert(h, prec) for h in histories))
 
 
 def create_data(
         users: int = 10_000,
         days: int = 14,
         per_day: int = 16,
-        low: float = -10,
-        high: float = 10,
-        step_low: float = -0.1,
-        step_high: float = 0.1):
+        low: float = -1,
+        high: float = 1,
+        step_low: float = -0.01,
+        step_high: float = 0.01):
     times = create_times(users, datetime.now(), days, per_day)
     loc = abs(high) - abs(low)
     scale = np.sqrt((high - low) / 2)
@@ -120,8 +130,16 @@ def create_data(
     save_histories(to_histories(locs, times))
 
 
+def save_contacts(contacts, n):
+    save(CONTACTS_FILE_FORMAT.format(n), contacts)
+
+
+def load_contacts(n: int):
+    return load(CONTACTS_FILE_FORMAT.format(n))
+
+
 def save_times(times):
-    np.save(TIMES_FILENAME, times)
+    save(TIMES_FILENAME, times)
 
 
 def load_times(n=None):
@@ -129,7 +147,7 @@ def load_times(n=None):
 
 
 def save_values(values):
-    np.save(VALUES_FILENAME, values)
+    save(VALUES_FILENAME, values)
 
 
 def load_values(n=None):
@@ -137,7 +155,7 @@ def load_values(n=None):
 
 
 def save_scores(scores):
-    np.save(SCORES_FILENAME, scores)
+    save(SCORES_FILENAME, scores)
 
 
 def load_scores(n=None):
@@ -145,7 +163,7 @@ def load_scores(n=None):
 
 
 def save_locations(locations):
-    np.save(LOCATIONS_FILENAME, locations)
+    save(LOCATIONS_FILENAME, locations)
 
 
 def load_locations(n=None):
@@ -153,12 +171,24 @@ def load_locations(n=None):
 
 
 def save_histories(histories):
-    np.save(HISTORIES_FILENAME, histories)
+    save(HISTORIES_FILENAME, histories)
 
 
-def load_histories(n=None):
-    return load(HISTORIES_FILENAME, n)
+def load_histories(n=None, geohashes: bool = True, prec: int = 8):
+    histories = load(HISTORIES_FILENAME, n)
+    if geohashes:
+        histories = to_geohashes(histories, prec)
+    return histories
+
+
+def save(filename: str, arr: np.ndarray):
+    with warnings.catch_warnings():
+        np.save(filename, arr)
 
 
 def load(filename, n=None):
     return np.load(filename, allow_pickle=True)[:n]
+
+
+if __name__ == '__main__':
+    create_data()

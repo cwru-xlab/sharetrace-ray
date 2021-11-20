@@ -254,15 +254,14 @@ class RiskPropagation(BaseActorSystem):
         'transmission',
         'tol',
         'parts',
-        'logger',
         'timeout',
         'max_dur',
         'early_stop',
+        'logger',
         '_scores')
 
     def __init__(
             self,
-            logger: logging.Logger,
             time_buffer: int = 172_800,
             time_const: float = 1.,
             transmission: float = 0.8,
@@ -271,9 +270,9 @@ class RiskPropagation(BaseActorSystem):
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None,
-            inbox: Optional[Any] = None):
+            inbox: Optional[Any] = None,
+            logger: Optional[logging.Logger] = None):
         super().__init__(ACTOR_SYSTEM, inbox)
-        self.logger = logger
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
@@ -282,6 +281,7 @@ class RiskPropagation(BaseActorSystem):
         self.timeout = timeout
         self.max_dur = max_dur
         self.early_stop = early_stop
+        self.logger = logger
         self._scores: int = -1
 
     def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
@@ -297,8 +297,10 @@ class RiskPropagation(BaseActorSystem):
         return self._handle([receive() for _ in range(self.parts)])
 
     def _handle(self, data: Collection) -> np.ndarray:
-        for log in (log for _, log in data):
-            self.logger.info(log)
+        if self.logger is not None:
+            info, logger = util.info, self.logger
+            for log in (log for _, log in data):
+                info(logger, log)
         results = (res for res, _ in data)
         data = functools.reduce(lambda d1, d2: {**d1, **d2}, results)
         return np.array([data[i] for i in range(self._scores)])
@@ -344,15 +346,16 @@ class RiskPropagation(BaseActorSystem):
         adj = [np.unique(adj.get(n, EMPTY)) for n in range(self._scores)]
         labels = self.partition(adj)
         graph.update((n, model.node(ne, labels[n])) for n, ne in enumerate(adj))
-        self.logger.info(json.dumps({
-            'GraphSizeInMb': util.approx(util.get_mb(graph)),
-            'TimeBufferInSec': self.time_buffer,
-            'Transmission': util.approx(self.transmission),
-            'SendTolerance': util.approx(self.tol),
-            'Partitions': self.parts,
-            'TimeoutInSec': util.approx(self.timeout),
-            'MaxDurationInSec': util.approx(self.max_dur),
-            'EarlyStop': self.early_stop}))
+        if self.logger is not None:
+            util.info(self.logger, json.dumps({
+                'GraphSizeInMb': util.approx(util.get_mb(graph)),
+                'TimeBufferInSec': self.time_buffer,
+                'Transmission': util.approx(self.transmission),
+                'SendTolerance': util.approx(self.tol),
+                'Partitions': self.parts,
+                'TimeoutInSec': util.approx(self.timeout),
+                'MaxDurationInSec': util.approx(self.max_dur),
+                'EarlyStop': self.early_stop}))
         return graph, labels
 
     def partition(self, adj: NpSeq) -> np.ndarray:

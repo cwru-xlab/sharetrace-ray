@@ -17,15 +17,19 @@ NOW = round(datetime.datetime.utcnow().timestamp())
 
 LOGS_DIR = 'logs'
 LOGGERS = (
-    'contact-search',
-    'propagation-serial',
-    'propagation-lewicki',
-    'propagation-ray',
-    'propagation-100:1900',
-    'propagation-2000:3900',
-    'propagation-4000:5900',
-    'propagation-6000:7900',
-    'propagation-8000:10000')
+    'contact-search:100-2900',
+    'contact-search:3000-5400',
+    'contact-search:5500-7400',
+    'contact-search:7500-8900',
+    'contact-search:9000-10000',
+    'risk-propagation:serial',
+    'risk-propagation:lewicki',
+    'risk-propagation:ray',
+    'risk-propagation:100-2900',
+    'risk-propagation:3000-5400',
+    'risk-propagation:5500-7400',
+    'risk-propagation:7500-8900',
+    'risk-propagation:9000-10000')
 
 
 def logging_config():
@@ -38,7 +42,7 @@ def logging_config():
             'root': {
                 'level': logging.INFO,
                 'handlers': ['console']
-            }
+            },
         },
         'handlers': {
             'console': {
@@ -62,8 +66,14 @@ def logging_config():
             'class': 'logging.FileHandler',
             'level': logging.INFO,
             'formatter': 'default',
+            'mode': 'w',
             'filename': f'{LOGS_DIR}//{logger}.log'}
     return config
+
+
+def info(logger: logging.Logger, msg: str, *args):
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(msg, *args)
 
 
 def time(func: Callable[[], Any]) -> Timer:
