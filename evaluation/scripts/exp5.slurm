@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --time=01:00:00
-#SBATCH -p classc -A sxg125_csds438 -N 4 --mem=16gb
-#SBATCH --job-name="contact-tracing:exp1"
+#SBATCH -p classc -A sxg125_csds438 -N 1 -n 8 --mem=16gb
+#SBATCH --job-name="contact-tracing:exp5"
 #SBATCH --mail-user=rdt46@case.edu
 #SBATCH --mail-type=ALL
 
