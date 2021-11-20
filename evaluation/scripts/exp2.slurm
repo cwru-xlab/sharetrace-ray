@@ -1,4 +1,4 @@
-exp1.slurm#!/bin/bash
+#!/bin/bash
 
 #SBATCH --time=04:00:00
 #SBATCH -p classc -A sxg125_csds438 -N 1 -n 4 --mem=16gb
