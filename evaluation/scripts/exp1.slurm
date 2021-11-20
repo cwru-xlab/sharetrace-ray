@@ -18,8 +18,9 @@ mkdir -p $PYTHONUSERBASE
 cp ~/contact-tracing $PFSDIR
 cd $PFSDIR
 
+pip install --upgrade pip
 pip install -r ~/contact-tracing/requirements.txt --user
-python3 -m pip install -e ~/contact-tracing
+pip install -e ~/contact-tracing
 
 cd ~/contact-tracing/evaluation
 
