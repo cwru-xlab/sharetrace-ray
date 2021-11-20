@@ -1,9 +1,9 @@
-from setuptools import setup
+import setuptools
 
-setup(
+setuptools.setup(
     name="contact-tracing",
     version="0.1.0",
-    packages=[""],
+    packages=["sharetrace", "lewicki"],
     url="https://github.com/csds438-f21-project/contact-tracing",
     license="MIT",
     author="Ryan Tatton",
