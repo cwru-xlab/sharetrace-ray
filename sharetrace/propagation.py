@@ -225,7 +225,7 @@ class Partition(BaseActor):
                 # propagates further from its source. Thus, this criterion
                 # will converge. A higher tolerance data in faster
                 # convergence at the cost of completeness.
-                high_enough = score['val'] > init['val'] * tol
+                high_enough = score['val'] >= init['val'] * tol
                 # The older the score, the likelier it is to be propagated,
                 # regardless of its value. A newer score with a lower value
                 # will not result in an update to the neighbor. This
