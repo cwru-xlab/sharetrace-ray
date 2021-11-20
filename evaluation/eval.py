@@ -46,11 +46,11 @@ def parse():
                     U:   number of users
                     S:   step size
 
-                1: CS               P = 1 – 4   U = 100 – 2.9K    S = 100
-                2: CS               P = 1 – 4   U = 3K – 5.4K     S = 100
-                3: CS               P = 1 – 4   U = 5.5K – 7.4K   S = 100
-                4: CS               P = 1 – 4   U = 7.5K – 8.9K   S = 100
-                5: CS               P = 1 – 4   U = 9K – 10K      S = 100
+                1: CS               P = 4       U = 100 – 2.9K    S = 100
+                2: CS               P = 4       U = 3K – 5.4K     S = 100
+                3: CS               P = 4       U = 5.5K – 7.4K   S = 100
+                4: CS               P = 4       U = 7.5K – 8.9K   S = 100
+                5: CS               P = 4       U = 9K – 10K      S = 100
                 6: RP (serial)      P = 1       U = 100 – 1K      S = 100
                 7: RP (lewicki)     P = 1 – 4   U = 100 – 1K      S = 100
                 8: RP (ray)         P = 1 – 4   U = 100 – 1K      S = 100
@@ -88,8 +88,8 @@ def exp5():
 def contact_search(start: int, stop: int, step: int = 100):
     logger = get_logger('contact-search', start, stop)
     histories = synthetic.load_histories()
-    for w, n in itertools.product(range(1, 5), range(start, stop, step)):
-        cs = search.KdTreeContactSearch(logger=logger, min_dur=900, workers=w)
+    for n in range(start, stop, step):
+        cs = search.KdTreeContactSearch(logger=logger, min_dur=900, workers=4)
         contacts = cs.search(histories[:n])
         synthetic.save_contacts(contacts, n)
 
