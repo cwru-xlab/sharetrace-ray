@@ -89,7 +89,7 @@ def contact_search(start: int, stop: int, step: int = 100):
     logger = get_logger('contact-search', start, stop)
     histories = synthetic.load_histories()
     for n in range(start, stop, step):
-        cs = search.KdTreeContactSearch(logger=logger, min_dur=900, workers=4)
+        cs = search.KdTreeContactSearch(logger=logger, min_dur=900, workers=-1)
         contacts = cs.search(histories[:n])
         synthetic.save_contacts(contacts, n)
 
