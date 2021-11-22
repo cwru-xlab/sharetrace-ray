@@ -78,7 +78,7 @@ class BruteContactSearch(BaseContactSearch):
 
     def _search(self, histories: Histories) -> Contacts:
         pairs = self.pairs(histories)
-        par = joblib.Parallel(n_jobs=self.workers)
+        par = joblib.Parallel(self.workers, verbose=2)
         contacts = par(joblib.delayed(self._find_contact)(*p) for p in pairs)
         contacts = np.array([c for c in contacts if c is not None])
         return contacts
@@ -86,7 +86,7 @@ class BruteContactSearch(BaseContactSearch):
     def pairs(self, histories: Histories) -> Pairs:
         return itertools.combinations(histories, 2)
 
-    def _find_contact(self, h1: np.void, h2: np.void) -> Optional[np.ndarray]:
+    def _find_contact(self, h1: np.void, h2: np.void) -> Optional[np.void]:
         found = None
         name1, name2 = h1['name'], h2['name']
         if name1 != name2:
@@ -101,7 +101,7 @@ class BruteContactSearch(BaseContactSearch):
             i1: int,
             locs2: np.ndarray,
             i2: int
-    ) -> Sequence[np.ndarray]:
+    ) -> Sequence[np.void]:
         events = []
         later, create_event, find, add_events = (
             self._later, self._event, self._find, events.extend)
@@ -134,8 +134,7 @@ class BruteContactSearch(BaseContactSearch):
             add_events(create_event(start, loc1, loc2))
         return events
 
-    def _event(
-            self, start, loc1: np.void, loc2: np.void) -> Iterable[np.ndarray]:
+    def _event(self, start, loc1: np.void, loc2: np.void) -> Iterable[np.void]:
         end = self._earlier(loc1, loc2)
         dur = end - start
         return [model.event(start, dur)] if dur >= self._min_dur else EMPTY
