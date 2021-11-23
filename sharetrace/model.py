@@ -76,7 +76,7 @@ def event(time: DateTime, dur: TimeDelta) -> np.void:
 
     Args:
         time: A datetime datetime or numpy datetime64.
-        dur: A datetime timedelta or numpy timedelta64
+        dur: A datetime timedelta or numpy timedelta64.
 
     Returns:
         A structured array with attributes 'time' and 'dur'.
@@ -86,19 +86,17 @@ def event(time: DateTime, dur: TimeDelta) -> np.void:
     return np.array([(time, dur)], dtype=dt)[0]
 
 
-def contact(names: ArrayLike, events: ArrayLike) -> np.void:
-    """Creates a named set of events.
+def contact(names: ArrayLike, time: DateTime, dur: TimeDelta) -> np.void:
+    """Creates a named event.
 
     Args:
         names: An iterable, typically of length 2.
-        events: An iterable of event numpy structured arrays.
-
+        time: A datetime datetime or numpy datetime64.
+        dur: A datetime timedelta or numpy timedelta64.
     Returns:
-        A structured array with attributes 'names', 'time', and 'delta'.
+        A structured array with attributes 'names', 'time', and 'dur'.
     """
-    names, events = np.array(names), np.array(events)
-    most_recent = np.sort(events, order=('time', 'dur'), kind='stable')[-1]
-    time, dur = most_recent['time'], most_recent['dur']
+    names, time, dur = np.array(names), np.datetime64(time), np.timedelta64(dur)
     dt = [
         ('names', names.dtype, names.shape),
         ('time', time.dtype),
