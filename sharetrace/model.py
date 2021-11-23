@@ -101,7 +101,8 @@ def contact(names: ArrayLike, time: DateTime, dur: TimeDelta) -> np.void:
         A structured array with attributes 'names', 'time', and 'dur'.
     """
     names = np.asarray(names)
-    time, dur = np.datetime64(time), np.timedelta64(dur)
+    time = np.datetime64(time)
+    dur = np.timedelta64(dur)
     dt = [
         ('names', names.dtype, names.shape),
         ('time', time.dtype),
