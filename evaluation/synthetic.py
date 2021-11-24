@@ -1,10 +1,8 @@
 import logging
-import logging
 import warnings
 from datetime import datetime
 from logging import config
 
-import joblib
 import numpy as np
 from scipy import stats
 
@@ -68,10 +66,12 @@ def take(a, idx, axis):
     return a[tuple(cut)]
 
 
-def create_values(locs, dist, z, days: int = 14, per_day: int = 16):
-    idx = np.arange(num_points(days, per_day), step=per_day)
-    selected = take(locs, idx, -1)
-    return np.vstack([dist.pdf(x.T) / z for x in selected])
+def create_values(users: int, per_user: int = 15, p: float = 0.5):
+    indicator = stats.bernoulli.rvs(p, size=users)
+    replace = np.flatnonzero(indicator)
+    values = rng.uniform(0, 0.5, size=(users, per_user))
+    values[replace] = rng.uniform(0.5, 1, size=(len(replace), per_user))
+    return values
 
 
 def num_points(days, per_day):
@@ -95,9 +95,22 @@ def to_histories(locs, times):
 
 
 def to_geohashes(histories, prec: int = 8):
-    par = joblib.Parallel()
-    convert = joblib.delayed(model.to_geohashes)
-    return np.array(par(convert(h, prec) for h in histories))
+    convert = model.to_geohashes
+    return [convert(h, prec) for h in histories]
+
+
+class Dataset:
+    __slots__ = ('times', 'values', 'locs', 'scores', 'histories')
+
+    def __init__(self, times, values, locs, scores, histories):
+        self.times = times
+        self.values = values
+        self.locs = locs
+        self.scores = scores
+        self.histories = histories
+
+    def geohashes(self, prec: int = 8):
+        return to_geohashes(self.histories, prec)
 
 
 def create_data(
@@ -107,7 +120,9 @@ def create_data(
         low: float = -1,
         high: float = 1,
         step_low: float = -0.01,
-        step_high: float = 0.01):
+        step_high: float = 0.01,
+        p: float = 0.2,
+        save: bool = False):
     times = create_times(users, datetime.now(), days, per_day)
     loc = abs(high) - abs(low)
     scale = np.sqrt((high - low) / 2)
@@ -120,26 +135,28 @@ def create_data(
         high=high,
         step_low=step_low,
         step_high=step_high)
-    mu = (loc, loc)
-    normal = stats.multivariate_normal(mu, np.eye(2) * scale)
-    values = create_values(locs, normal, normal.pdf(mu), days, per_day)
-    save_times(times)
-    save_values(values)
-    save_locations(locs)
-    save_scores(to_scores(values, times))
-    save_histories(to_histories(locs, times))
+    values = create_values(users, per_user=days + 1, p=p)
+    scores = to_scores(values, times)
+    histories = to_histories(locs, times)
+    if save:
+        save_times(times)
+        save_values(values)
+        save_locations(locs)
+        save_scores(scores)
+        save_histories(histories)
+    return Dataset(times, values, locs, scores, histories)
 
 
-def save_contacts(contacts, n):
-    save(CONTACTS_FILE_FORMAT.format(n), contacts)
+def save_contacts(contacts, n: int):
+    save_data(CONTACTS_FILE_FORMAT.format(n), contacts)
 
 
-def load_contacts(n: int):
+def load_contacts(n: int = None):
     return load(CONTACTS_FILE_FORMAT.format(n))
 
 
 def save_times(times):
-    save(TIMES_FILENAME, times)
+    save_data(TIMES_FILENAME, times)
 
 
 def load_times(n=None):
@@ -147,7 +164,7 @@ def load_times(n=None):
 
 
 def save_values(values):
-    save(VALUES_FILENAME, values)
+    save_data(VALUES_FILENAME, values)
 
 
 def load_values(n=None):
@@ -155,7 +172,7 @@ def load_values(n=None):
 
 
 def save_scores(scores):
-    save(SCORES_FILENAME, scores)
+    save_data(SCORES_FILENAME, scores)
 
 
 def load_scores(n=None):
@@ -163,7 +180,7 @@ def load_scores(n=None):
 
 
 def save_locations(locations):
-    save(LOCATIONS_FILENAME, locations)
+    save_data(LOCATIONS_FILENAME, locations)
 
 
 def load_locations(n=None):
@@ -171,7 +188,7 @@ def load_locations(n=None):
 
 
 def save_histories(histories):
-    save(HISTORIES_FILENAME, histories)
+    save_data(HISTORIES_FILENAME, histories)
 
 
 def load_histories(n=None, geohashes: bool = True, prec: int = 8):
@@ -181,9 +198,9 @@ def load_histories(n=None, geohashes: bool = True, prec: int = 8):
     return histories
 
 
-def save(filename: str, arr: np.ndarray):
-    with warnings.catch_warnings():
-        np.save(filename, arr)
+def save_data(filename: str, arr: np.ndarray):
+    warnings.filterwarnings("ignore")
+    np.save(filename, arr)
 
 
 def load(filename, n=None):
