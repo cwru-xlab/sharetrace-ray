@@ -30,7 +30,7 @@ class ContactSearch:
             leaf_size: int = 10,
             p: float = 2,
             eps: float = 1e-5,
-            tol: float = 0.01,
+            tol: float = 1,
             workers: int = 1,
             logger: Optional[logging.Logger] = None):
         """Configures contact search.
@@ -67,6 +67,7 @@ class ContactSearch:
         # 'Auto' batch size results in slow performance.
         par = joblib.Parallel(self.workers, batch_size=500, verbose=2)
         find_contact = joblib.delayed(self._find_contact)
+        # Memmapping the arguments does not result in a speedup.
         contacts = par(find_contact(p, histories, locs) for p in pairs)
         return np.array([c for c in contacts if c is not None])
 
@@ -74,17 +75,16 @@ class ContactSearch:
             self,
             pair: np.ndarray,
             histories: Sequence[np.void],
-            locs: np.ndarray
+            locs: Sequence[np.ndarray]
     ) -> Optional[np.void]:
         u1, u2 = pair
         hist1, hist2 = histories[u1], histories[u2]
         times1, locs1 = _resample(hist1['locs']['time'], locs[u1])
         times2, locs2 = _resample(hist2['locs']['time'], locs[u2])
         times1, locs1, times2, locs2 = _pad(times1, locs1, times2, locs2)
-        close = self._proximal(locs1, locs2)
-        intervals = _intervals(close)
         contact = None
-        if len(intervals) > 0:
+        if len(close := self._proximal(locs1, locs2)) > 0:
+            intervals = _intervals(close)
             options = np.flatnonzero(
                 intervals[:, 1] - intervals[:, 0] >= self.min_dur / 60)
             if len(options) > 0:
@@ -96,22 +96,16 @@ class ContactSearch:
         return contact
 
     def _selected(self, histories: Sequence[np.void]) -> Tuple:
-        """Returns the unique user pairs and all coordinates for each user."""
-        coordinates = self._coordinates(histories)
-        idx = _index(coordinates)
-        pairs = self._query_pairs(np.concatenate(coordinates))
-        return _select(pairs, idx), coordinates
+        """Returns the unique user pairs and grouped Cartesian coordinates."""
+        latlongs = [_latlongs(h) for h in histories]
+        idx = _index(latlongs)
+        xy = _project(np.concatenate(latlongs))
+        pairs = self._query_pairs(xy)
+        return _select(pairs, idx), _partition(xy, idx)
 
-    def _coordinates(self, histories: Sequence[np.void]) -> Sequence[np.void]:
-        """Converts the geohashes of the histories to lat-long coordinates."""
-        par = joblib.Parallel(self.workers)
-        return par(joblib.delayed(_coords)(h) for h in histories)
-
-    def _query_pairs(self, coordinates: np.ndarray) -> np.ndarray:
+    def _query_pairs(self, points: np.ndarray) -> np.ndarray:
         """Returns all sufficiently-near neighbor pairs for each location."""
-        # TODO Don't we need to pass back the projected coordinates?
-        xy = _project(coordinates)
-        kd_tree = spatial.KDTree(xy, self.leaf_size)
+        kd_tree = spatial.KDTree(points, self.leaf_size)
         return kd_tree.query_pairs(self.r, self.p, self.eps, 'ndarray')
 
     def _proximal(self, locs1: np.ndarray, locs2: np.ndarray) -> np.ndarray:
@@ -135,12 +129,12 @@ class ContactSearch:
                 'Tolerance': self.tol}))
 
 
-def _coords(history: np.void) -> np.ndarray:
+def _latlongs(history: np.void) -> np.ndarray:
     """Maps a location history to lat-long coordinate pairs."""
     return model.to_coords(history)['locs']['loc']
 
 
-def _index(locations: Sequence[np.void]) -> np.ndarray:
+def _index(locations: Sequence[np.ndarray]) -> np.ndarray:
     """Returns a mapping from (flattened) locations to users."""
     users = np.arange(len(locations))
     # Must flatten after indexing to know number of locations for each user.
@@ -148,9 +142,9 @@ def _index(locations: Sequence[np.void]) -> np.ndarray:
     return np.repeat(users, repeats)
 
 
-def _project(coordinates: np.ndarray) -> np.ndarray:
+def _project(latlongs: np.ndarray) -> np.ndarray:
     """Projects from latitude-longitude to x-y Cartesian coordinates."""
-    lats, longs = coordinates.T
+    lats, longs = latlongs.T
     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
     transformer = pyproj.Transformer.from_proj(lla, ecef)
@@ -158,10 +152,15 @@ def _project(coordinates: np.ndarray) -> np.ndarray:
     return np.column_stack(projected)
 
 
-def _select(queried: np.ndarray, user_idx: np.ndarray) -> np.ndarray:
+def _select(points: np.ndarray, idx: np.ndarray) -> np.ndarray:
     """Selects the unique users pairs that correspond to the queried points."""
-    selected = np.unique(user_idx[queried], axis=0)
+    selected = np.unique(idx[points], axis=0)
     return selected[~(selected[:, 0] == selected[:, 1])]
+
+
+def _partition(a: np.ndarray, idx: np.ndarray) -> Sequence[np.ndarray]:
+    """Groups the values in an array by the index."""
+    return [a[idx == u] for u in np.unique(idx)]
 
 
 def _resample(times: np.ndarray, locs: np.ndarray) -> Tuple:
@@ -180,9 +179,7 @@ def _intervals(a: np.ndarray) -> np.ndarray:
     """Returns an array of start-end contiguous interval pairs."""
     split_at = np.flatnonzero(np.diff(a) != 1)
     chunks = np.split(a, split_at + 1)
-    has_splits = not (len(chunks) == 1 and len(chunks[0]) == 0)
-    intervals = [(ch[0], ch[-1] + 1) for ch in chunks] if has_splits else []
-    return np.array(intervals, dtype=np.int64)
+    return np.array([(ch[0], ch[-1] + 1) for ch in chunks], dtype=np.int64)
 
 
 def _pad(
@@ -203,10 +200,13 @@ def _expand(times: np.ndarray, locs: np.ndarray, start: int, end: int) -> Tuple:
     """Expands the times and locations to the new start/end, fills with inf. """
     prepend = np.arange(start, times[0])
     append = np.arange(times[-1] + 1, end + 1)
-    new_times = np.concatenate((prepend, times, append))
-    # Use inf as dummy value; used when finding small differences, so these
-    # new values will never be selected. Assumes lat-long coordinates.
-    prepend = np.ones((2, len(prepend))) * np.inf
-    append = np.ones((2, len(append))) * np.inf
-    new_locs = np.column_stack((prepend, locs, append))
+    if len(prepend) > 0 or len(append) > 0:
+        new_times = np.concatenate((prepend, times, append))
+        # Use inf as dummy value; used when finding small differences, so these
+        # new values will never be selected. Assumes lat-long coordinates.
+        prepend = np.ones((2, len(prepend))) * np.inf
+        append = np.ones((2, len(append))) * np.inf
+        new_locs = np.column_stack((prepend, locs, append))
+    else:
+        new_times, new_locs = times, locs
     return new_times, new_locs
