@@ -13,8 +13,6 @@ import numpy as np
 TimeDelta = Union[datetime.timedelta, np.timedelta64]
 DateTime = Union[datetime.datetime, np.datetime64]
 
-NOW = round(datetime.datetime.utcnow().timestamp())
-
 LOGS_DIR = 'logs'
 LOGGERS = (
     'contact-search:100-2900',
@@ -66,14 +64,9 @@ def logging_config():
             'class': 'logging.FileHandler',
             'level': logging.INFO,
             'formatter': 'default',
-            'mode': 'w',
+            'mode': 'a',
             'filename': f'{LOGS_DIR}//{logger}.log'}
     return config
-
-
-def info(logger: logging.Logger, msg: str, *args):
-    if logger.isEnabledFor(logging.INFO):
-        logger.info(msg, *args)
 
 
 def time(func: Callable[[], Any]) -> Timer:

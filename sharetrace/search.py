@@ -116,7 +116,7 @@ class ContactSearch:
 
     def log(self, inputs: int, contacts: int, runtime: float) -> NoReturn:
         if self.logger is not None:
-            util.info(self.logger, json.dumps({
+            self.logger.info(json.dumps({
                 'RuntimeInSec': util.approx(runtime),
                 'Workers': self.workers,
                 'MinDurationInSec': self.min_dur,
@@ -135,7 +135,14 @@ def to_latlongs(history: np.void) -> np.ndarray:
 
 
 def get_index(locations: Sequence[np.ndarray]) -> np.ndarray:
-    """Returns a mapping from (flattened) locations to users."""
+    """Returns a mapping from (flattened) locations to users.
+
+    Args:
+        locations: Sequence of (N, 2) numpy arrays.
+
+    Notes:
+        Each entry in locations may differ in the number pairs.
+    """
     users = np.arange(len(locations))
     # Must flatten after indexing to know number of locations for each user.
     repeats = [len(locs) for locs in locations]
@@ -143,18 +150,31 @@ def get_index(locations: Sequence[np.ndarray]) -> np.ndarray:
 
 
 def project(latlongs: np.ndarray) -> np.ndarray:
-    """Projects from latitude-longitude to x-y Cartesian coordinates."""
+    """Projects from latitude-longitude to x-y Cartesian coordinates.
+
+    Args:
+        latlongs: An (N, 2) numpy array of N latitude-longitude pairs.
+    """
     lats, longs = latlongs.T
-    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
-    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    # Do not preserve units so that they are always in meters.
+    lla = pyproj.Proj(
+        proj='latlong', ellps='WGS84', datum='WGS84', preserve_units=False)
+    ecef = pyproj.Proj(
+        proj='geocent', ellps='WGS84', datum='WGS84', preserve_units=False)
     transformer = pyproj.Transformer.from_proj(lla, ecef)
     projected = transformer.transform(longs, lats, radians=False)
     return np.column_stack(projected)
 
 
 def select(points: np.ndarray, idx: np.ndarray) -> np.ndarray:
-    """Selects the unique users pairs that correspond to the queried points."""
+    """Selects the unique users pairs that correspond to the queried points.
+
+    Args:
+        points: An (N, 2) numpy array of spatial points.
+        idx: An (N,) numpy array that maps each point to a user identifier.
+    """
     selected = np.unique(idx[points], axis=0)
+    # Only include pairs that correspond to two distinct users.
     return selected[~(selected[:, 0] == selected[:, 1])]
 
 
@@ -191,8 +211,8 @@ def pad(
     """Pads the times and locations based on the union of the time ranges."""
     start = min(times1[0], times2[0])
     end = max(times1[-1], times2[-1])
-    (new_times1, new_locs1) = expand(times1, locs1, start, end)
-    (new_times2, new_locs2) = expand(times2, locs2, start, end)
+    new_times1, new_locs1 = expand(times1, locs1, start, end)
+    new_times2, new_locs2 = expand(times2, locs2, start, end)
     return new_times1, new_locs1, new_times2, new_locs2
 
 

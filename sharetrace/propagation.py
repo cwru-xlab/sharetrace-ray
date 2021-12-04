@@ -7,9 +7,10 @@ import logging
 import queue
 import time
 import timeit
+import uuid
 from enum import Enum
 from typing import (
-    Any, Collection, Hashable, Iterable, Mapping, MutableMapping,
+    Any, Collection, Dict, Hashable, Iterable, Mapping, MutableMapping,
     NoReturn, Optional, Sequence, Tuple, Type
 )
 
@@ -103,7 +104,7 @@ class Partition(BaseActor):
         log = self._log(timed.seconds)
         return self.on_complete(results, log)
 
-    def _log(self, runtime: float) -> str:
+    def _log(self, runtime: float) -> Dict[str, Any]:
         def safe_stat(func, values):
             return 0 if len(values) == 0 else util.approx(func(values))
 
@@ -126,7 +127,7 @@ class Partition(BaseActor):
         funcs = ((min, 'Min'), (max, 'Max'), (np.mean, 'Avg'), (np.std, 'Std'))
         for (datum, name), (f, fname) in itertools.product(data, funcs):
             logged[name.format(fname)] = safe_stat(f, datum)
-        return json.dumps(logged)
+        return logged
 
     def _run(self):
         stop, receive, on_next = self.should_stop, self.receive, self.on_next
@@ -231,8 +232,8 @@ class Partition(BaseActor):
                 # will not result in an update to the neighbor. This
                 # criterion will not converge as messages do not get older.
                 # The conjunction of the first criterion allows for convergence.
-                older = score['time'] < init['time']
-                if high_enough and older:
+                old_enough = score['time'] <= init['time']
+                if high_enough and old_enough:
                     dgroup = graph[f]['group']
                     send(message(score, var, sgroup, f, dgroup))
 
@@ -258,7 +259,8 @@ class RiskPropagation(BaseActorSystem):
         'max_dur',
         'early_stop',
         'logger',
-        '_scores')
+        '_scores',
+        '_log_id')
 
     def __init__(
             self,
@@ -283,6 +285,7 @@ class RiskPropagation(BaseActorSystem):
         self.early_stop = early_stop
         self.logger = logger
         self._scores: int = -1
+        self._log_id = str(uuid.uuid4())
 
     def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
         self._scores = len(scores)
@@ -297,10 +300,10 @@ class RiskPropagation(BaseActorSystem):
         return self._handle([receive() for _ in range(self.parts)])
 
     def _handle(self, data: Collection) -> np.ndarray:
-        if self.logger is not None:
-            info, logger = util.info, self.logger
+        if (logger := self.logger) is not None:
             for log in (log for _, log in data):
-                info(logger, log)
+                log.update({'LogId': self._log_id})
+                logger.info(json.dumps(log))
         results = (res for res, _ in data)
         data = functools.reduce(lambda d1, d2: {**d1, **d2}, results)
         return np.array([data[i] for i in range(self._scores)])
@@ -343,12 +346,21 @@ class RiskPropagation(BaseActorSystem):
             adj[n2].append(n1)
             graph[ckey(n1, n2)] = contact['time']
         # Keep indexing consistent in case of users that have no contacts.
-        adj = [np.unique(adj.get(n, EMPTY)) for n in range(self._scores)]
+        # TODO Re-index and don't add disconnected nodes; this may be
+        #  negatively impacting METIS.
+        #   Move all disconnected nodes to the end
+        #   Shift nodes with neighbors to front
+        with_ne = np.array([n for n in range(self._scores) if n in adj])
+        no_ne = np.array([n for n in range(self._scores) if n not in adj])
+        adj = [np.unique(adj[n]) for n in with_ne]
         labels = self.partition(adj)
         graph.update((n, model.node(ne, labels[n])) for n, ne in enumerate(adj))
-        if self.logger is not None:
-            util.info(self.logger, json.dumps({
+        if (logger := self.logger) is not None:
+            logger.info(json.dumps({
+                'LogId': self._log_id,
                 'GraphSizeInMb': util.approx(util.get_mb(graph)),
+                'Nodes': self._scores,
+                'Edges': len(contacts),
                 'TimeBufferInSec': self.time_buffer,
                 'Transmission': util.approx(self.transmission),
                 'SendTolerance': util.approx(self.tol),

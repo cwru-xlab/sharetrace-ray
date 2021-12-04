@@ -1,4 +1,5 @@
 import logging
+import os
 import warnings
 from datetime import datetime
 from logging import config
@@ -20,6 +21,11 @@ SCORES_FILENAME = 'data//scores.npy'
 LOCATIONS_FILENAME = 'data//locations.npy'
 HISTORIES_FILENAME = 'data//histories.npy'
 CONTACTS_FILE_FORMAT = 'data//contacts:{}.npy'
+
+try:
+    os.mkdir('./data')
+except FileExistsError:
+    pass
 
 
 def walk(
@@ -208,4 +214,4 @@ def load(filename, n=None):
 
 
 if __name__ == '__main__':
-    create_data()
+    create_data(1000, low=-0.5, high=0.5, p=0.3, save=True)
