@@ -1,26 +1,32 @@
 import datetime
 import json
 import logging
-from typing import NoReturn, Optional, Sequence, Tuple
+from typing import NoReturn, Optional, Sequence, Tuple, Union
 
 import joblib
 import numpy as np
-import pyproj
-from scipy import interpolate, spatial
+from scipy import interpolate
+from sklearn import neighbors
 
 from sharetrace import model, util
 
+Array = np.ndarray
+NDArrays = Sequence[Array]
+Histories = Sequence[np.void]
+
+# Source: https://nssdc.gsfc.nasa.gov/planetary/factsheet/earthfact.html
+_EARTH_RADIUS_METERS = 6_378_137
+
 
 class ContactSearch:
-    """Algorithm for finding contacts in location histories using a KD tree."""
+    """Algorithm for finding contacts in trajectories using a ball tree."""
     __slots__ = (
         'min_dur',
         'r',
         'leaf_size',
-        'p',
-        'eps',
         'tol',
         'workers',
+        'verbose',
         'logger')
 
     def __init__(
@@ -28,54 +34,70 @@ class ContactSearch:
             min_dur: float = 0,
             r: float = 1e-4,
             leaf_size: int = 10,
-            p: float = 2,
-            eps: float = 1e-5,
             tol: float = 1,
             workers: int = 1,
+            verbose: int = 0,
             logger: Optional[logging.Logger] = None):
         """Configures contact search.
 
         Args:
             min_dur: Minimum duration (in seconds) for a contact.
-            r: Radius used by the KD tree to find nearest neighbors.
-            leaf_size: Number of points in a KD leaf before using brute force.
-            p: Minkowski norm used by KD tree to measure distance.
-            eps: If nonzero, used for approximate nearest-neighbor search.
+            r: Radius (meter) used by the ball tree to find nearest neighbors.
+            leaf_size: Number of points in a leaf before using brute force.
             tol: Minimum distance between two locations to be "in contact."
             workers: Number of concurrent workers. -1 uses all processes.
+            verbose: Level of verbosity used when printing joblib updates.
             logger: Logger for logging contact search statistics.
         """
         self.min_dur = min_dur
         self.r = r
         self.leaf_size = leaf_size
-        self.p = p
-        self.eps = eps
         self.tol = tol
         self.workers = workers
+        self.verbose = verbose
         self.logger = logger
 
-    def search(self, histories: Sequence[np.void]) -> np.ndarray:
+    def search(
+            self,
+            histories: Histories,
+            return_pairs: bool = False
+    ) -> Union[Array, Tuple]:
         """Searches the location histories for contacts."""
         timer = util.time(lambda: self._search(histories))
-        result = timer.result
-        self.log(len(histories), len(result), timer.seconds)
-        return result
+        contacts, pairs = timer.result
+        self.log(len(histories), len(contacts), timer.seconds)
+        return (contacts, pairs) if return_pairs else contacts
 
-    def _search(self, histories: Sequence[np.void]) -> np.ndarray:
-        pairs, locs = self.selected(histories)
-        print(f'Number of selected pairs: {len(pairs)}')
+    def _search(self, histories: Histories) -> NDArrays:
+        pairs, locs = self.select(histories)
         # 'Auto' batch size results in slow performance.
-        par = joblib.Parallel(self.workers, batch_size=500, verbose=2)
+        par = joblib.Parallel(
+            self.workers, batch_size=500, verbose=self.verbose)
         find_contact = joblib.delayed(self.find_contact)
         # Memmapping the arguments does not result in a speedup.
         contacts = par(find_contact(p, histories, locs) for p in pairs)
-        return np.array([c for c in contacts if c is not None])
+        return np.array([c for c in contacts if c is not None]), pairs
+
+    def select(self, histories: Histories) -> Tuple:
+        """Returns the unique user pairs and grouped Cartesian coordinates."""
+        points, pidx = flatten([to_latlongs(h) for h in histories])
+        tree = neighbors.BallTree(points, self.leaf_size, metric='haversine')
+        queried, qidx = flatten(
+            tree.query_radius(points, self.r / _EARTH_RADIUS_METERS))
+        # Sorting along the last axis ensures duplicate pairs are removed.
+        pairs = np.sort(np.column_stack((qidx, queried)))
+        selected = np.unique(pidx[pairs], axis=0)
+        # Only include pairs that correspond to two distinct users.
+        selected = selected[~(selected[:, 0] == selected[:, 1])]
+        # Use the point index for both selecting and partitioning.
+        groups = [points[pidx == u] for u in range(len(histories))]
+        return selected, groups
 
     def find_contact(
             self,
-            pair: np.ndarray,
-            histories: Sequence[np.void],
-            locs: Sequence[np.ndarray]
+            pair: Array,
+            histories: Histories,
+            locs: NDArrays
     ) -> Optional[np.void]:
         u1, u2 = pair
         hist1, hist2 = histories[u1], histories[u2]
@@ -84,31 +106,17 @@ class ContactSearch:
         times1, locs1, times2, locs2 = pad(times1, locs1, times2, locs2)
         contact = None
         if len(close := self.proximal(locs1, locs2)) > 0:
-            intervals = get_intervals(close)
-            options = np.flatnonzero(
-                intervals[:, 1] - intervals[:, 0] >= self.min_dur / 60)
-            if len(options) > 0:
+            ints = get_intervals(close)
+            opts = np.flatnonzero(ints[:, 1] - ints[:, 0] >= self.min_dur / 60)
+            if len(opts) > 0:
                 names = (hist1['name'], hist2['name'])
-                start, end = intervals[options[-1]]
+                start, end = ints[opts[-1]]
                 duration = np.timedelta64(end - start, 'm')
                 time = datetime.datetime.utcfromtimestamp(times1[start] * 60)
                 contact = model.contact(names, time, duration)
         return contact
 
-    def selected(self, histories: Sequence[np.void]) -> Tuple:
-        """Returns the unique user pairs and grouped Cartesian coordinates."""
-        latlongs = [to_latlongs(h) for h in histories]
-        idx = get_index(latlongs)
-        xy = project(np.concatenate(latlongs))
-        pairs = self.query_pairs(xy)
-        return select(pairs, idx), partition(xy, idx)
-
-    def query_pairs(self, points: np.ndarray) -> np.ndarray:
-        """Returns all sufficiently-near neighbor pairs for each location."""
-        kd_tree = spatial.KDTree(points, self.leaf_size)
-        return kd_tree.query_pairs(self.r, self.p, self.eps, 'ndarray')
-
-    def proximal(self, locs1: np.ndarray, locs2: np.ndarray) -> np.ndarray:
+    def proximal(self, locs1: Array, locs2: Array) -> Array:
         """Returns the (time) indices the locations that are close."""
         # Uses the default L2 norm.
         diff = np.linalg.norm(locs1.T - locs2.T, axis=1)
@@ -124,66 +132,21 @@ class ContactSearch:
                 'Contacts': contacts,
                 'Radius': self.r,
                 'LeafSize': self.leaf_size,
-                'MinkowskiNorm': self.p,
-                'Epsilon': self.eps,
                 'Tolerance': self.tol}))
 
 
-def to_latlongs(history: np.void) -> np.ndarray:
-    """Maps a location history to lat-long coordinate pairs."""
-    return model.to_coords(history)['locs']['loc']
+def to_latlongs(history: np.void) -> Array:
+    """Maps a location history to radian lat-long coordinate pairs."""
+    return np.radians(model.to_coords(history)['locs']['loc'])
 
 
-def get_index(locations: Sequence[np.ndarray]) -> np.ndarray:
-    """Returns a mapping from (flattened) locations to users.
-
-    Args:
-        locations: Sequence of (N, 2) numpy arrays.
-
-    Notes:
-        Each entry in locations may differ in the number pairs.
-    """
-    users = np.arange(len(locations))
-    # Must flatten after indexing to know number of locations for each user.
-    repeats = [len(locs) for locs in locations]
-    return np.repeat(users, repeats)
+def flatten(arrays: NDArrays) -> NDArrays:
+    """Return a flat concatenation and an index to map back to seq indices. """
+    idx = np.repeat(np.arange(len(arrays)), repeats=[len(a) for a in arrays])
+    return np.concatenate(arrays), idx
 
 
-def project(latlongs: np.ndarray) -> np.ndarray:
-    """Projects from latitude-longitude to x-y Cartesian coordinates.
-
-    Args:
-        latlongs: An (N, 2) numpy array of N latitude-longitude pairs.
-    """
-    lats, longs = latlongs.T
-    # Do not preserve units so that they are always in meters.
-    lla = pyproj.Proj(
-        proj='latlong', ellps='WGS84', datum='WGS84', preserve_units=False)
-    ecef = pyproj.Proj(
-        proj='geocent', ellps='WGS84', datum='WGS84', preserve_units=False)
-    transformer = pyproj.Transformer.from_proj(lla, ecef)
-    projected = transformer.transform(longs, lats, radians=False)
-    return np.column_stack(projected)
-
-
-def select(points: np.ndarray, idx: np.ndarray) -> np.ndarray:
-    """Selects the unique users pairs that correspond to the queried points.
-
-    Args:
-        points: An (N, 2) numpy array of spatial points.
-        idx: An (N,) numpy array that maps each point to a user identifier.
-    """
-    selected = np.unique(idx[points], axis=0)
-    # Only include pairs that correspond to two distinct users.
-    return selected[~(selected[:, 0] == selected[:, 1])]
-
-
-def partition(a: np.ndarray, idx: np.ndarray) -> Sequence[np.ndarray]:
-    """Groups the values in an array by the index."""
-    return [a[idx == u] for u in np.unique(idx)]
-
-
-def resample(times: np.ndarray, locs: np.ndarray) -> Tuple:
+def resample(times: Array, locs: Array) -> NDArrays:
     """Resamples the times and locations to be at the minute-resolution."""
     # Second resolution results in really slow performance.
     times = np.int64(times.astype('datetime64[m]'))
@@ -195,19 +158,14 @@ def resample(times: np.ndarray, locs: np.ndarray) -> Tuple:
     return new_times, new_locs
 
 
-def get_intervals(a: np.ndarray) -> np.ndarray:
+def get_intervals(a: Array) -> Array:
     """Returns an array of start-end contiguous interval pairs."""
     split_at = np.flatnonzero(np.diff(a) != 1)
     chunks = np.split(a, split_at + 1)
-    return np.array([(ch[0], ch[-1] + 1) for ch in chunks], dtype=np.int64)
+    return np.array([(c[0], c[-1] + 1) for c in chunks], dtype=np.int64)
 
 
-def pad(
-        times1: np.ndarray,
-        locs1: np.ndarray,
-        times2: np.ndarray,
-        locs2: np.ndarray
-) -> Tuple:
+def pad(times1: Array, locs1: Array, times2: Array, locs2: Array) -> NDArrays:
     """Pads the times and locations based on the union of the time ranges."""
     start = min(times1[0], times2[0])
     end = max(times1[-1], times2[-1])
@@ -216,17 +174,18 @@ def pad(
     return new_times1, new_locs1, new_times2, new_locs2
 
 
-def expand(times: np.ndarray, locs: np.ndarray, start: int, end: int) -> Tuple:
+def expand(times: Array, locs: Array, start: int, end: int) -> Tuple:
     """Expands the times and locations to the new start/end, fills with inf. """
     prepend = np.arange(start, times[0])
     append = np.arange(times[-1] + 1, end + 1)
-    if len(prepend) > 0 or len(append) > 0:
+    psize, asize = prepend.size, append.size
+    if psize > 0 or asize > 0:
         new_times = np.concatenate((prepend, times, append))
         # Use inf as dummy value; used when finding small differences, so these
         # new values will never be selected. Assumes lat-long coordinates.
-        prepend = np.ones((2, len(prepend))) * np.inf
-        append = np.ones((2, len(append))) * np.inf
-        new_locs = np.column_stack((prepend, locs, append))
+        prepend = np.full((2, psize), np.inf)
+        append = np.full((2, asize), np.inf)
+        new_locs = np.hstack((prepend, locs, append))
     else:
         new_times, new_locs = times, locs
     return new_times, new_locs
