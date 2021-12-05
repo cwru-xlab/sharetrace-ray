@@ -75,21 +75,6 @@ def to_coord(geohash: np.void) -> np.void:
     return temporal_loc((lat, long), geohash['time'])
 
 
-def event(time: DateTime, dur: TimeDelta) -> np.void:
-    """Creates a timestamped duration, where the timestamp indicates the start.
-
-    Args:
-        time: A datetime datetime or numpy datetime64.
-        dur: A datetime timedelta or numpy timedelta64.
-
-    Returns:
-        A structured array with attributes 'time' and 'dur'.
-    """
-    time, dur = np.datetime64(time), np.timedelta64(dur)
-    dt = [('time', time.dtype), ('dur', dur.dtype)]
-    return np.array([(time, dur)], dtype=dt)[0]
-
-
 def contact(names: ArrayLike, time: DateTime, dur: TimeDelta) -> np.void:
     """Creates a named event.
 
