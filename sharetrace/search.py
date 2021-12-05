@@ -41,10 +41,10 @@ class ContactSearch:
         """Configures contact search.
 
         Args:
-            min_dur: Minimum duration (in seconds) for a contact.
-            r: Radius (meter) used by the ball tree to find nearest neighbors.
+            min_dur: Min duration (seconds) for a contact.
+            r: Radius (meters) used by the ball tree to find nearest neighbors.
             leaf_size: Number of points in a leaf before using brute force.
-            tol: Minimum distance between two locations to be "in contact."
+            tol: Min distance (meters) between two locations to be "in contact."
             workers: Number of concurrent workers. -1 uses all processes.
             verbose: Level of verbosity used when printing joblib updates.
             logger: Logger for logging contact search statistics.
@@ -86,12 +86,12 @@ class ContactSearch:
             tree.query_radius(points, self.r / _EARTH_RADIUS_METERS))
         # Sorting along the last axis ensures duplicate pairs are removed.
         pairs = np.sort(np.column_stack((qidx, queried)))
-        selected = np.unique(pidx[pairs], axis=0)
+        pairs = np.unique(pidx[pairs], axis=0)
         # Only include pairs that correspond to two distinct users.
-        selected = selected[~(selected[:, 0] == selected[:, 1])]
-        # Use the point index for both selecting and partitioning.
-        groups = [points[pidx == u] for u in range(len(histories))]
-        return selected, groups
+        pairs = pairs[~(pairs[:, 0] == pairs[:, 1])]
+        # Use the user point index for both selecting and grouping.
+        locs = [points[pidx == u] for u in range(len(histories))]
+        return pairs, locs
 
     def find_contact(
             self,
@@ -120,7 +120,7 @@ class ContactSearch:
         """Returns the (time) indices the locations that are close."""
         # Uses the default L2 norm.
         diff = np.linalg.norm(locs1.T - locs2.T, axis=1)
-        return np.flatnonzero(diff <= self.tol)
+        return np.flatnonzero(diff <= self.tol / _EARTH_RADIUS_METERS)
 
     def log(self, inputs: int, contacts: int, runtime: float) -> NoReturn:
         if self.logger is not None:
@@ -151,6 +151,8 @@ def resample(times: Array, locs: Array) -> NDArrays:
     # Second resolution results in really slow performance.
     times = np.int64(times.astype('datetime64[m]'))
     # Prefer interp1d over np.interp to use 'previous' interpolation.
+    # Use the transpose of locs so its shape is (2, n_samples), where each
+    # row is latitude and longitude.
     interp = interpolate.interp1d(
         times, locs.T, kind='previous', assume_sorted=True)
     new_times = np.arange(times[0], times[-1])
