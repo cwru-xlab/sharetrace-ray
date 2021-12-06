@@ -361,12 +361,12 @@ class RiskPropagation(BaseActorSystem):
                 'GraphSizeInMb': util.approx(util.get_mb(graph)),
                 'Nodes': self._scores,
                 'Edges': len(contacts),
-                'TimeBufferInSec': self.time_buffer,
+                'TimeBufferInSeconds': self.time_buffer,
                 'Transmission': util.approx(self.transmission),
                 'SendTolerance': util.approx(self.tol),
                 'Partitions': self.parts,
-                'TimeoutInSec': util.approx(self.timeout),
-                'MaxDurationInSec': util.approx(self.max_dur),
+                'TimeoutInSeconds': util.approx(self.timeout),
+                'MaxDurationInSeconds': util.approx(self.max_dur),
                 'EarlyStop': self.early_stop}))
         return graph, labels
 

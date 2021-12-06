@@ -15,7 +15,7 @@ NDArrays = Sequence[Array]
 Histories = Sequence[np.void]
 
 # Source: https://nssdc.gsfc.nasa.gov/planetary/factsheet/earthfact.html
-_EARTH_RADIUS_METERS = 6_378_137
+_EARTH_RADIUS_METERS = 6378137
 
 
 class ContactSearch:
@@ -41,10 +41,10 @@ class ContactSearch:
         """Configures contact search.
 
         Args:
-            min_dur: Min duration (seconds) for a contact.
+            min_dur: Minimum duration (minutes) for a contact.
             r: Radius (meters) used by the ball tree to find nearest neighbors.
             leaf_size: Number of points in a leaf before using brute force.
-            tol: Min distance (meters) between two locations to be "in contact."
+            tol: Minimum distance (meters) b/t two locations to be "in contact."
             workers: Number of concurrent workers. -1 uses all processes.
             verbose: Level of verbosity used when printing joblib updates.
             logger: Logger for logging contact search statistics.
@@ -107,10 +107,10 @@ class ContactSearch:
         contact = None
         if len(close := self.proximal(locs1, locs2)) > 0:
             ints = get_intervals(close)
-            opts = np.flatnonzero(ints[:, 1] - ints[:, 0] >= self.min_dur / 60)
-            if len(opts) > 0:
+            durations = ints[:, 1] - ints[:, 0]
+            if len(options := np.flatnonzero(durations >= self.min_dur)) > 0:
                 names = (hist1['name'], hist2['name'])
-                start, end = ints[opts[-1]]
+                start, end = ints[options[-1]]
                 duration = np.timedelta64(end - start, 'm')
                 time = datetime.datetime.utcfromtimestamp(times1[start] * 60)
                 contact = model.contact(names, time, duration)
@@ -125,14 +125,14 @@ class ContactSearch:
     def log(self, inputs: int, contacts: int, runtime: float) -> NoReturn:
         if self.logger is not None:
             self.logger.info(json.dumps({
-                'RuntimeInSec': util.approx(runtime),
+                'RuntimeInSeconds': util.approx(runtime),
                 'Workers': self.workers,
-                'MinDurationInSec': self.min_dur,
-                'InputSize': inputs,
+                'MinDurationInSeconds': self.min_dur,
+                'Inputs': inputs,
                 'Contacts': contacts,
-                'Radius': self.r,
                 'LeafSize': self.leaf_size,
-                'Tolerance': self.tol}))
+                'RadiusInMeters': self.r,
+                'ToleranceInMeters': self.tol}))
 
 
 def to_latlongs(history: np.void) -> Array:
@@ -144,6 +144,13 @@ def flatten(arrays: NDArrays) -> NDArrays:
     """Return a flat concatenation and an index to map back to seq indices. """
     idx = np.repeat(np.arange(len(arrays)), repeats=[len(a) for a in arrays])
     return np.concatenate(arrays), idx
+
+
+def get_intervals(a: Array) -> Array:
+    """Returns an array of start-end contiguous interval pairs."""
+    split_at = np.flatnonzero(np.diff(a) != 1)
+    chunks = np.split(a, split_at + 1)
+    return np.array([(c[0], c[-1] + 1) for c in chunks], dtype=np.int64)
 
 
 def resample(times: Array, locs: Array) -> NDArrays:
@@ -158,13 +165,6 @@ def resample(times: Array, locs: Array) -> NDArrays:
     new_times = np.arange(times[0], times[-1])
     new_locs = interp(new_times)
     return new_times, new_locs
-
-
-def get_intervals(a: Array) -> Array:
-    """Returns an array of start-end contiguous interval pairs."""
-    split_at = np.flatnonzero(np.diff(a) != 1)
-    chunks = np.split(a, split_at + 1)
-    return np.array([(c[0], c[-1] + 1) for c in chunks], dtype=np.int64)
 
 
 def pad(times1: Array, locs1: Array, times2: Array, locs2: Array) -> NDArrays:
