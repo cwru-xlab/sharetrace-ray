@@ -165,8 +165,8 @@ def main():
 
 def cs_main():
     logger = logging.getLogger()
-    histories = synthetic.create_data(100, low=-2, high=2, save=False)
-    cs = search.ContactSearch(logger=logger, min_dur=900, workers=-1)
+    histories = synthetic.create_data(100, low=-1, high=1, save=False)
+    cs = search.ContactSearch(logger=logger, min_dur=15, tol=200, workers=-1)
     contacts = cs.search(histories.geohashes())
 
 
@@ -174,7 +174,7 @@ def rp_main():
     logger = logging.getLogger()
     histories = synthetic.load_histories()
     scores = synthetic.load_scores()
-    cs = search.ContactSearch(min_dur=900, workers=-1)
+    cs = search.ContactSearch(min_dur=15, workers=-1)
     contacts = cs.search(histories)
     rp = propagation.RiskPropagation(
         logger=logger, parts=4, timeout=0.01, tol=0.3)
@@ -183,4 +183,4 @@ def rp_main():
 
 
 if __name__ == '__main__':
-    rp_main()
+    cs_main()
