@@ -70,9 +70,10 @@ class ContactSearch:
 
     def _search(self, histories: Histories) -> NDArrays:
         pairs, locs = self.select(histories)
-        # 'Auto' batch size results in slow performance.
+        # For loky backend, use batch_size = 500; 'auto' is slow.
+        # No difference in speed between 'threads' and 'processes' backend.
         par = joblib.Parallel(
-            self.workers, batch_size=500, verbose=self.verbose)
+            self.workers, prefer='threads', verbose=self.verbose)
         find_contact = joblib.delayed(self.find_contact)
         # Memmapping the arguments does not result in a speedup.
         contacts = par(find_contact(p, histories, locs) for p in pairs)
