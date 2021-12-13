@@ -1,6 +1,5 @@
 import collections
-import datetime
-import functools
+import copy
 import itertools
 import json
 import logging
@@ -10,8 +9,7 @@ import timeit
 import uuid
 from enum import Enum
 from typing import (
-    Any, Collection, Dict, Hashable, Iterable, Mapping, MutableMapping,
-    NoReturn, Optional, Sequence, Tuple, Type
+    Any, Collection, Dict, Hashable, Mapping, Optional, Sequence, Tuple, Type
 )
 
 import numpy as np
@@ -22,22 +20,24 @@ from ray.util.queue import Empty as RayEmpty, Queue as RayQueue
 
 from lewicki.lewicki.actors import BaseActor, BaseActorSystem
 from sharetrace import model, util
+from sharetrace.util import approx
 
-NpSeq = Sequence[np.ndarray]
-NpMap = Mapping[int, np.ndarray]
+Array = np.ndarray
+NpSeq = Sequence[Array]
+NpMap = Mapping[int, Array]
 Graph = Mapping[Hashable, Any]
-MutableGraph = MutableMapping[Hashable, Any]
 Nodes = Mapping[int, np.void]
 
 ACTOR_SYSTEM = -1
 DAY = np.timedelta64(1, 'D')
-EMPTY = ()
-# This is only used for comparison. Cannot use exactly 0 with log.
-DEFAULT_SCORE = model.risk_score(0, datetime.datetime.min)
 
 
 def ckey(n1, n2) -> Tuple:
     return min(n1, n2), max(n1, n2)
+
+
+def initial(scores: Array) -> np.void:
+    return np.sort(scores, order=('val', 'time'))[-1]
 
 
 class StopCondition(Enum):
@@ -53,7 +53,7 @@ class Partition(BaseActor):
         'time_const',
         'transmission',
         'tol',
-        'empty_except',
+        'empty_error',
         'timeout',
         'max_dur',
         'early_stop',
@@ -86,7 +86,7 @@ class Partition(BaseActor):
         self.transmission = transmission
         self.tol = tol
         self.timeout = timeout
-        self.empty_except = empty_except
+        self.empty_error = empty_except
         self.max_dur = max_dur
         self.early_stop = early_stop
         self._local = collections.deque()
@@ -104,9 +104,9 @@ class Partition(BaseActor):
         log = self._log(timed.seconds)
         return self.on_complete(results, log)
 
-    def _log(self, runtime: float) -> Dict[str, Any]:
+    def _log(self, runtime: float) -> Mapping[str, Any]:
         def safe_stat(func, values):
-            return 0 if len(values) == 0 else util.approx(func(values))
+            return 0 if len(values) == 0 else approx(func(values))
 
         nodes, (condition, data) = self._nodes, self._stop_condition
         update = np.array([
@@ -116,10 +116,10 @@ class Partition(BaseActor):
         updates = updates[updates != 0]
         logged = {
             'Partition': self.name,
-            'RuntimeInSec': util.approx(runtime),
+            'RuntimeInSec': approx(runtime),
             'Messages': self._msgs,
             'Nodes': len(nodes),
-            'NodeDataInMb': util.approx(util.get_mb(nodes)),
+            'NodeDataInMb': approx(util.get_mb(nodes)),
             'Updates': len(updates),
             'StopCondition': condition.name,
             'StopData': data}
@@ -146,27 +146,27 @@ class Partition(BaseActor):
         if (max_dur := self.max_dur) is not None:
             if too_long := ((timeit.default_timer() - self._start) >= max_dur):
                 self._stop_condition = (StopCondition.MAX_DURATION, max_dur)
-        if (early_stop := self.early_stop) is not None:
+        elif (early_stop := self.early_stop) is not None:
             if no_updates := (self._since_update >= early_stop):
                 self._stop_condition = (StopCondition.EARLY_STOP, early_stop)
-        if self._timed_out:
+        elif self._timed_out:
             self._stop_condition = (StopCondition.TIMED_OUT, self.timeout)
         return self._timed_out or too_long or no_updates
 
-    def receive(self) -> Optional[Any]:
+    def receive(self) -> Optional[np.void]:
         # Prioritize local convergence over processing remote messages.
         if len((local := self._local)) > 0:
             msg = local.popleft()
         else:
             try:
                 msg = self.inbox.get(block=True, timeout=self.timeout)
-            except self.empty_except:
+            except self.empty_error:
                 msg, self._timed_out = None, True
         self._msgs += msg is not None
         return msg
 
-    def on_next(self, msg: np.void) -> NoReturn:
-        """Update the variable node and send messages to neighbors."""
+    def on_next(self, msg: np.void) -> None:
+        """Update the variable node and send messages to its neighbors."""
         factor, var, score = msg['src'], msg['dest'], msg['val']
         # As a variable node, update its current value.
         self._update(var, score)
@@ -174,7 +174,7 @@ class Partition(BaseActor):
         factors = self.graph[var]['ne']
         self._send(np.array([score]), var, factors[factor != factors])
 
-    def _update(self, var: int, score: np.void) -> NoReturn:
+    def _update(self, var: int, score: np.void) -> None:
         """Update the exposure score of the current variable node."""
         if (new := score['val']) > (props := self._nodes[var])['curr']:
             self._since_update = 0
@@ -183,14 +183,15 @@ class Partition(BaseActor):
         elif self.early_stop is not None and self._init_done:
             self._since_update += 1
 
-    def _on_initial(self, scores: NpMap) -> NoReturn:
+    def _on_initial(self, scores: NpMap) -> None:
         # Must be a mapping since indices may neither start at 0 nor be
         # contiguous, based on the original input scores.
         nodes = {}
+        transmission = self.transmission
         for var, vscores in scores.items():
-            init = np.sort(vscores, order=('val', 'time'))[-1]
+            init = initial(vscores)
             init_msg = init.copy()
-            init_msg['val'] *= self.transmission
+            init_msg['val'] *= transmission
             nodes[var] = {
                 'init_val': init['val'],
                 'init_msg': init_msg,
@@ -203,7 +204,7 @@ class Partition(BaseActor):
             send(vscores, var, graph[var]['ne'])
         self._init_done = True
 
-    def _send(self, scores: np.ndarray, var: int, factors: np.ndarray):
+    def _send(self, scores: Array, var: int, factors: Array):
         """Compute a factor node message and send if it will be effective."""
         graph, init, sgroup, send, buffer, tol, const, transmission = (
             self.graph, self._nodes[var]['init_msg'], self.name, self.send,
@@ -237,7 +238,7 @@ class Partition(BaseActor):
                     dgroup = graph[f]['group']
                     send(message(score, var, sgroup, f, dgroup))
 
-    def send(self, msg: Any, key: int = None) -> NoReturn:
+    def send(self, msg: Any, key: int = None) -> None:
         """Send a message either to the local inbox or an outbox."""
         # msg must be a message structured array if key is None
         if key is None:
@@ -254,12 +255,14 @@ class RiskPropagation(BaseActorSystem):
         'time_const',
         'transmission',
         'tol',
-        'parts',
+        'workers',
         'timeout',
         'max_dur',
         'early_stop',
         'logger',
-        '_scores',
+        '_nodes',
+        '_u2i',
+        '_init',
         '_log_id')
 
     def __init__(
@@ -268,51 +271,68 @@ class RiskPropagation(BaseActorSystem):
             time_const: float = 1.,
             transmission: float = 0.8,
             tol: float = 0.1,
-            parts: int = 1,
+            workers: int = 1,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None,
             inbox: Optional[Any] = None,
             logger: Optional[logging.Logger] = None):
         super().__init__(ACTOR_SYSTEM, inbox)
+        assert time_buffer > 0 and isinstance(time_buffer, int)
+        assert time_const > 0
+        assert tol >= 0
+        assert workers > 0 and isinstance(workers, int)
+        assert timeout > 0 if timeout is not None else True
+        assert max_dur > 0 if max_dur is not None else True
+        assert early_stop > 0 if early_stop is not None else True
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
         self.tol = tol
-        self.parts = parts
+        self.workers = workers
         self.timeout = timeout
         self.max_dur = max_dur
         self.early_stop = early_stop
         self.logger = logger
-        self._scores: int = -1
+        self._nodes: int = -1
+        self._u2i: Mapping[int, int] = {}
+        self._init: Dict[int, float] = {}
+        self._log_id: str = ""
+
+    def setup(self, scores: NpSeq, contacts: Array) -> None:
+        """Create the graph, log statistics, and send symptom scores."""
+        assert len(scores) > 0 and len(contacts) > 0
         self._log_id = str(uuid.uuid4())
+        graph, parts = self.create_graph(scores, contacts)
+        self.send(parts)
 
-    def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
-        self._scores = len(scores)
-        graph, membership = self.create_graph(contacts)
-        self._connect(graph)
-        groups = self._group(scores, membership)
-        self.send(*groups)
-
-    def run(self) -> np.ndarray:
+    def run(self) -> Array:
+        """Initiate message passing and return the exposure scores."""
         super().run()
         receive = self.receive
-        return self._handle([receive() for _ in range(self.parts)])
+        return self._results([receive() for _ in range(self.workers)])
 
-    def _handle(self, data: Collection) -> np.ndarray:
+    def _results(self, data: Collection) -> Array:
+        self._log_parts(data)
+        return self._gather_results(data)
+
+    def _log_parts(self, data: Collection) -> None:
         if (logger := self.logger) is not None:
             for log in (log for _, log in data):
                 log.update({'LogId': self._log_id})
                 logger.info(json.dumps(log))
-        results = (res for res, _ in data)
-        data = functools.reduce(lambda d1, d2: {**d1, **d2}, results)
-        return np.array([data[i] for i in range(self._scores)])
 
-    def _connect(self, graph: Graph) -> NoReturn:
-        create = self.create_partition
-        self.connect(*(create(name, graph) for name in range(self.parts)))
+    def _gather_results(self, data: Collection) -> Array:
+        merged = copy.copy(self._init)
+        for results, _ in data:
+            merged.update(results)
+        # Use the reverse mapping to preserve the original ordering.
+        results = np.zeros(len(self._u2i))
+        for u, i in self._u2i.items():
+            results[u] = merged[i]
+        return results
 
-    def create_partition(self, name: Hashable, graph: Graph) -> Partition:
+    def create_part(self, name: Hashable, graph: Graph) -> Partition:
         return Partition(
             name=name,
             graph=graph,
@@ -325,54 +345,81 @@ class RiskPropagation(BaseActorSystem):
             max_dur=self.max_dur,
             early_stop=self.early_stop)
 
-    def _group(self, scores: NpSeq, idx: Iterable[int]) -> Sequence[NpMap]:
-        groups = [dict() for _ in range(self.parts)]
-        for var, (g, vscores) in enumerate(zip(idx, scores)):
-            groups[g][var] = vscores
-        return groups
-
-    def send(self, *nodes: NpSeq) -> NoReturn:
+    def send(self, parts: Sequence[NpMap]) -> None:
         outbox = self.outbox
-        for p, pnodes in enumerate(nodes):
-            outbox[p].put(pnodes, block=True)
+        for p, pscores in enumerate(parts):
+            outbox[p].put(pscores, block=True)
 
-    def create_graph(self, contacts: NpSeq) -> Tuple[Graph, np.ndarray]:
-        graph: MutableGraph = {}
-        adj = collections.defaultdict(list)
+    def create_graph(
+            self,
+            scores: NpSeq,
+            contacts: Array
+    ) -> Tuple[Graph, Sequence[NpMap]]:
+        self._index(scores, contacts)
+        graph, adj, n2i = self._build_graph(contacts)
+        n2p = self.partition(adj)
+        graph.update(
+            (n2i[n], model.node(ne, n2p[n])) for n, ne in enumerate(adj))
+        self._connect(graph)
+        parts = self._group(scores, {i: p for i, p in zip(n2i, n2p)})
+        self._log_stats(len(contacts), graph)
+        return graph, parts
+
+    def _index(self, scores: NpSeq, contacts: Array) -> None:
         # Assumes a name corresponds to an index in scores.
+        with_ne = set(contacts['names'].flatten().tolist())
+        no_ne = set(range(len(scores))) - with_ne
+        # METIS requires contiguous indexing.
+        # Relies on consistent iteration ordering to index.
+        u2i = {u: i for i, u in enumerate(itertools.chain(with_ne, no_ne))}
+        self._u2i = u2i
+        # Compute the exposure score for those without neighbors.
+        self._init = {u2i[u]: initial(scores[u])['val'] for u in no_ne}
+
+    def _build_graph(self, contacts: Array) -> Tuple:
+        u2i = self._u2i
+        graph, adj = {}, collections.defaultdict(list)
         for contact in contacts:
-            n1, n2 = contact['names']
-            adj[n1].append(n2)
-            adj[n2].append(n1)
-            graph[ckey(n1, n2)] = contact['time']
-        # Keep indexing consistent in case of users that have no contacts.
-        # TODO Re-index and don't add disconnected nodes; this may be
-        #  negatively impacting METIS.
-        #   Move all disconnected nodes to the end
-        #   Shift nodes with neighbors to front
-        with_ne = np.array([n for n in range(self._scores) if n in adj])
-        no_ne = np.array([n for n in range(self._scores) if n not in adj])
-        adj = [np.unique(adj[n]) for n in with_ne]
-        labels = self.partition(adj)
-        graph.update((n, model.node(ne, labels[n])) for n, ne in enumerate(adj))
+            u1, u2 = contact['names']
+            i1, i2 = u2i[u1], u2i[u2]
+            adj[i1].append(i2)
+            adj[i2].append(i1)
+            graph[ckey(i1, i2)] = contact['time']
+        # Relies on consistent iteration ordering to index.
+        n2i, adj = list(adj), list(adj.values())
+        self._nodes = len(adj)
+        return graph, adj, n2i
+
+    def _connect(self, graph: Graph) -> None:
+        self.connect(*(self.create_part(p, graph) for p in range(self.workers)))
+
+    def _group(self, scores: NpSeq, i2p: Mapping[int, int]) -> Sequence[NpMap]:
+        parts = [{} for _ in range(self.workers)]
+        # Exclude those that correspond to users without neighbors.
+        init, u2i = self._init, self._u2i
+        for u, uscores in enumerate(scores):
+            if (i := u2i[u]) not in init:
+                parts[i2p[i]][i] = uscores
+        return parts
+
+    def partition(self, adj: Sequence) -> Array:
+        _, labels = pymetis.part_graph(self.workers, adj)
+        return labels
+
+    def _log_stats(self, contacts: int, graph: Graph):
         if (logger := self.logger) is not None:
             logger.info(json.dumps({
                 'LogId': self._log_id,
-                'GraphSizeInMb': util.approx(util.get_mb(graph)),
-                'Nodes': self._scores,
-                'Edges': len(contacts),
+                'GraphSizeInMb': approx(util.get_mb(graph)),
+                'Nodes': self._nodes,
+                'Edges': contacts,
                 'TimeBufferInSeconds': self.time_buffer,
-                'Transmission': util.approx(self.transmission),
-                'SendTolerance': util.approx(self.tol),
-                'Partitions': self.parts,
-                'TimeoutInSeconds': util.approx(self.timeout),
-                'MaxDurationInSeconds': util.approx(self.max_dur),
+                'Transmission': approx(self.transmission),
+                'SendTolerance': approx(self.tol),
+                'Workers': self.workers,
+                'TimeoutInSeconds': approx(self.timeout),
+                'MaxDurationInSeconds': approx(self.max_dur),
                 'EarlyStop': self.early_stop}))
-        return graph, labels
-
-    def partition(self, adj: NpSeq) -> np.ndarray:
-        cuts, labels = pymetis.part_graph(self.parts, adj)
-        return labels
 
 
 class RayPartition(Partition):
@@ -386,7 +433,7 @@ class RayPartition(Partition):
         # Do not block to allow asynchronous invocation of actors.
         return self._actor.run.remote()
 
-    def connect(self, *actors: BaseActor) -> NoReturn:
+    def connect(self, *actors: BaseActor) -> None:
         # Block to ensure all actors get connected before running.
         ray.get(self._actor.connect.remote(*actors))
 
@@ -414,9 +461,9 @@ class RayRiskPropagation(RiskPropagation):
 
     def __init__(self, *args, **kwargs):
         # Actor system does not need an inbox None uses multiprocessing.Queue.
-        super().__init__(*args, inbox=EMPTY, **kwargs)
+        super().__init__(*args, inbox=None, **kwargs)
 
-    def create_partition(self, name: Hashable, graph: ObjectRef) -> Partition:
+    def create_part(self, name: Hashable, graph: ObjectRef) -> Partition:
         # Ray Queue must be created and then passed as an object reference.
         return RayPartition(
             name=name,
@@ -431,21 +478,25 @@ class RayRiskPropagation(RiskPropagation):
             max_dur=self.max_dur,
             early_stop=self.early_stop)
 
-    def create_graph(self, contacts: NpSeq) -> Tuple[ObjectRef, np.ndarray]:
-        graph, membership = super().create_graph(contacts)
-        return ray.put(graph), membership
+    def create_graph(
+            self,
+            scores: NpSeq,
+            contacts: Array
+    ) -> Tuple[ObjectRef, Sequence[NpMap]]:
+        graph, parts = super().create_graph(scores, contacts)
+        return ray.put(graph), parts
 
     def run(self) -> Any:
         # No need to use a queue since Ray actors can return data.
-        results = self._handle(ray.get([a.run() for a in self.actors]))
+        results = self._results(ray.get([a.run() for a in self.actors]))
         ray.shutdown()
         return results
 
-    def setup(self, scores: NpSeq, contacts: NpSeq) -> NoReturn:
+    def setup(self, scores: NpSeq, contacts: Array) -> None:
         ray.init()
         super().setup(scores, contacts)
 
-    def connect(self, *actors: BaseActor) -> NoReturn:
+    def connect(self, *actors: BaseActor) -> None:
         # Connect in order to send the initial message.
         BaseActor.connect(self, *actors)
         # Remember all actors in order to get their data.

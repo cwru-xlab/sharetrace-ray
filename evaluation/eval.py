@@ -165,22 +165,23 @@ def main():
 
 def cs_main():
     logger = logging.getLogger()
-    histories = synthetic.create_data(100, low=-1, high=1, save=False)
-    cs = search.ContactSearch(logger=logger, min_dur=15, tol=200, workers=-1)
-    contacts = cs.search(histories.geohashes())
+    dataset = synthetic.create_data(5000, low=-2, high=2, save=False)
+    cs = search.ContactSearch(
+        logger=logger, min_dur=15, tol=200, workers=-1, verbose=2)
+    contacts = cs.search(dataset.geohashes())
 
 
 def rp_main():
     logger = logging.getLogger()
-    histories = synthetic.load_histories()
-    scores = synthetic.load_scores()
-    cs = search.ContactSearch(min_dur=15, workers=-1)
-    contacts = cs.search(histories)
+    dataset = synthetic.create_data(100, low=-0.01, high=0.01, save=False)
+    cs = search.ContactSearch(
+        logger=logger, min_dur=15, tol=200, workers=-1, verbose=1)
+    contacts = cs.search(dataset.geohashes())
     rp = propagation.RiskPropagation(
-        logger=logger, parts=4, timeout=0.01, tol=0.3)
-    rp.setup(scores, contacts)
+        logger=logger, workers=1, timeout=0.01, tol=0.3)
+    rp.setup(dataset.scores, contacts)
     rp.run()
 
 
 if __name__ == '__main__':
-    cs_main()
+    rp_main()

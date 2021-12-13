@@ -1,7 +1,7 @@
 import datetime
 import json
 import logging
-from typing import NoReturn, Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union
 
 import joblib
 import numpy as np
@@ -123,7 +123,7 @@ class ContactSearch:
         diff = np.linalg.norm(locs1.T - locs2.T, axis=1)
         return np.flatnonzero(diff <= self.tol / _EARTH_RADIUS_METERS)
 
-    def log(self, inputs: int, contacts: int, runtime: float) -> NoReturn:
+    def log(self, inputs: int, contacts: int, runtime: float) -> None:
         if self.logger is not None:
             self.logger.info(json.dumps({
                 'RuntimeInSeconds': util.approx(runtime),
