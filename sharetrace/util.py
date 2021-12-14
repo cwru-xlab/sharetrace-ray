@@ -15,19 +15,11 @@ DateTime = Union[datetime.datetime, np.datetime64]
 
 LOGS_DIR = 'logs'
 LOGGERS = (
-    'contact-search:100-2900',
-    'contact-search:3000-5400',
-    'contact-search:5500-7400',
-    'contact-search:7500-8900',
-    'contact-search:9000-10000',
+    'contact-search',
     'risk-propagation:serial',
     'risk-propagation:lewicki',
     'risk-propagation:ray',
-    'risk-propagation:100-2900',
-    'risk-propagation:3000-5400',
-    'risk-propagation:5500-7400',
-    'risk-propagation:7500-8900',
-    'risk-propagation:9000-10000')
+    'risk-propagation:tolerance')
 
 
 def logging_config():

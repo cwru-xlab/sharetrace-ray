@@ -9,7 +9,8 @@ import timeit
 import uuid
 from enum import Enum
 from typing import (
-    Any, Collection, Dict, Hashable, Mapping, Optional, Sequence, Tuple, Type
+    Any, Collection, Dict, Hashable, Mapping, MutableMapping, Optional,
+    Sequence, Tuple, Type, Union
 )
 
 import numpy as np
@@ -25,9 +26,9 @@ from sharetrace.util import approx
 Array = np.ndarray
 NpSeq = Sequence[Array]
 NpMap = Mapping[int, Array]
-Graph = Mapping[Hashable, Any]
+Graph = MutableMapping[Hashable, Any]
 Nodes = Mapping[int, np.void]
-
+Index = Union[Mapping[int, int], Sequence[int], Array]
 ACTOR_SYSTEM = -1
 DAY = np.timedelta64(1, 'D')
 
@@ -81,7 +82,7 @@ class Partition(BaseActor):
             early_stop: Optional[int] = None):
         super().__init__(name, inbox)
         self.graph = graph
-        self.time_buffer = np.timedelta64(time_buffer, 's')
+        self.time_buffer = np.timedelta64(time_buffer, 'm')
         self.time_const = time_const
         self.transmission = transmission
         self.tol = tol
@@ -115,7 +116,7 @@ class Partition(BaseActor):
         updates = np.array([props['updates'] for props in nodes.values()])
         updates = updates[updates != 0]
         logged = {
-            'Partition': self.name,
+            'Name': self.name,
             'RuntimeInSec': approx(runtime),
             'Messages': self._msgs,
             'Nodes': len(nodes),
@@ -260,14 +261,15 @@ class RiskPropagation(BaseActorSystem):
         'max_dur',
         'early_stop',
         'logger',
-        '_nodes',
+        'nodes',
+        'edges',
         '_u2i',
         '_init',
-        '_log_id')
+        '_log')
 
     def __init__(
             self,
-            time_buffer: int = 172_800,
+            time_buffer: int = 2880,
             time_const: float = 1.,
             transmission: float = 0.8,
             tol: float = 0.1,
@@ -294,15 +296,15 @@ class RiskPropagation(BaseActorSystem):
         self.max_dur = max_dur
         self.early_stop = early_stop
         self.logger = logger
-        self._nodes: int = -1
-        self._u2i: Mapping[int, int] = {}
-        self._init: Dict[int, float] = {}
-        self._log_id: str = ""
+        self.nodes: int = -1
+        self.edges: int = -1
+        self._u2i: Index = {}
+        self._init: Mapping[int, float] = {}
+        self._log: MutableMapping = {}
 
     def setup(self, scores: NpSeq, contacts: Array) -> None:
         """Create the graph, log statistics, and send symptom scores."""
         assert len(scores) > 0 and len(contacts) > 0
-        self._log_id = str(uuid.uuid4())
         graph, parts, _ = self.create_graph(scores, contacts)
         self.send(parts)
 
@@ -314,19 +316,22 @@ class RiskPropagation(BaseActorSystem):
 
     def _results(self, data: Collection) -> Array:
         self._log_parts(data)
-        return self._gather_results(data)
+        results = self._gather_results(data)
+        self._log_results()
+        return results
+
+    def _log_results(self):
+        if (logger := self.logger) is not None:
+            logger.info(json.dumps(self._log))
 
     def _log_parts(self, data: Collection) -> None:
-        if (logger := self.logger) is not None:
-            for log in (log for _, log in data):
-                log.update({'LogId': self._log_id})
-                logger.info(json.dumps(log))
+        if self.logger is not None:
+            self._log['WorkerLogs'] = list(log for _, log in data)
 
     def _gather_results(self, data: Collection) -> Array:
-        merged = copy.copy(self._init)
+        merged = dict(self._init)
         for results, _ in data:
             merged.update(results)
-        # Use the reverse mapping to preserve the original ordering.
         results = np.zeros(len(self._u2i))
         for u, i in self._u2i.items():
             results[u] = merged[i]
@@ -354,15 +359,13 @@ class RiskPropagation(BaseActorSystem):
             self,
             scores: NpSeq,
             contacts: Array
-    ) -> Tuple[Graph, Sequence[NpMap], Array]:
+    ) -> Tuple[Graph, Sequence[NpMap], Index]:
         self._index(scores, contacts)
-        graph, adj, n2i = self._build_graph(contacts)
-        n2p = self.partition(adj)
-        graph.update(
-            (n2i[n], model.node(ne, n2p[n])) for n, ne in enumerate(adj))
+        graph, adj, n2i = self._add_factors(contacts)
+        n2p = self._add_vars(graph, adj, n2i)
         self._connect(graph)
-        parts = self._group(scores, {i: p for i, p in zip(n2i, n2p)})
-        self._log_stats(len(contacts), graph)
+        parts = self._group(scores, n2i, n2p)
+        self._log_stats(graph)
         return graph, parts, n2p
 
     def _index(self, scores: NpSeq, contacts: Array) -> None:
@@ -376,7 +379,7 @@ class RiskPropagation(BaseActorSystem):
         # Compute the exposure score for those without neighbors.
         self._init = {u2i[u]: initial(scores[u])['val'] for u in no_ne}
 
-    def _build_graph(self, contacts: Array) -> Tuple:
+    def _add_factors(self, contacts: Array) -> Tuple[Graph, Sequence, Index]:
         u2i = self._u2i
         graph, adj = {}, collections.defaultdict(list)
         for contact in contacts:
@@ -387,39 +390,45 @@ class RiskPropagation(BaseActorSystem):
             graph[ckey(i1, i2)] = contact['time']
         # Relies on consistent iteration ordering to index.
         n2i, adj = list(adj), list(adj.values())
-        self._nodes = len(adj)
+        self.nodes, self.edges = len(adj), len(graph)
         return graph, adj, n2i
-
-    def _connect(self, graph: Graph) -> None:
-        self.connect(*(self.create_part(p, graph) for p in range(self.workers)))
-
-    def _group(self, scores: NpSeq, i2p: Mapping[int, int]) -> Sequence[NpMap]:
-        parts = [{} for _ in range(self.workers)]
-        # Exclude those that correspond to users without neighbors.
-        init, u2i = self._init, self._u2i
-        for u, uscores in enumerate(scores):
-            if (i := u2i[u]) not in init:
-                parts[i2p[i]][i] = uscores
-        return parts
 
     def partition(self, adj: Sequence) -> Array:
         _, labels = pymetis.part_graph(self.workers, adj)
         return labels
 
-    def _log_stats(self, contacts: int, graph: Graph):
-        if (logger := self.logger) is not None:
-            logger.info(json.dumps({
-                'LogId': self._log_id,
+    def _add_vars(self, graph: Graph, adj: Sequence, n2i: Index) -> Index:
+        n2p = self.partition(adj)
+        graph.update(
+            (n2i[n], model.node(ne, n2p[n])) for n, ne in enumerate(adj))
+        return n2p
+
+    def _connect(self, graph: Graph) -> None:
+        self.connect(*(self.create_part(p, graph) for p in range(self.workers)))
+
+    def _group(self, scores: NpSeq, n2i: Index, n2p: Index) -> Sequence[NpMap]:
+        parts = [{} for _ in range(self.workers)]
+        # Exclude those that correspond to users without neighbors.
+        init, u2i = self._init, self._u2i
+        i2p = {i: p for i, p in zip(n2i, n2p)}
+        for u, uscores in enumerate(scores):
+            if (i := u2i[u]) not in init:
+                parts[i2p[i]][i] = uscores
+        return parts
+
+    def _log_stats(self, graph: Graph) -> None:
+        if self.logger is not None:
+            self._log.update({
                 'GraphSizeInMb': approx(util.get_mb(graph)),
-                'Nodes': self._nodes,
-                'Edges': contacts,
-                'TimeBufferInSeconds': self.time_buffer,
+                'Nodes': self.nodes,
+                'Edges': self.edges,
+                'TimeBufferInMinutes': self.time_buffer,
                 'Transmission': approx(self.transmission),
                 'SendTolerance': approx(self.tol),
                 'Workers': self.workers,
                 'TimeoutInSeconds': approx(self.timeout),
                 'MaxDurationInSeconds': approx(self.max_dur),
-                'EarlyStop': self.early_stop}))
+                'EarlyStop': self.early_stop})
 
 
 class RayPartition(Partition):

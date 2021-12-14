@@ -1,5 +1,4 @@
 import argparse
-import itertools
 import json
 import logging
 from logging import config
@@ -8,17 +7,18 @@ import numpy as np
 
 import synthetic
 from sharetrace import propagation, search, util
+from sharetrace.propagation import Array
 
 logging.config.dictConfig(util.logging_config())
 
 
-class LogExposuresRiskPropagation(propagation.RiskPropagation):
+class LogExposuresRiskPropagation(propagation.RayRiskPropagation):
     __slots__ = ()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def run(self) -> np.ndarray:
+    def run(self) -> Array:
         results = super().run()
         self.logger.info(json.dumps({'ExposureScores': results.tolist()}))
         return results
@@ -27,17 +27,9 @@ class LogExposuresRiskPropagation(propagation.RiskPropagation):
 def parse():
     parser = argparse.ArgumentParser(
         description='''
-            EXPERIMENTS
+            Experiment 5 measures the effect of the send tolerance.
 
-                Experiments 1 - 5: Evaluate contact search over a range of 
-                processors and users.
-                
-                Experiments 6 - 8: Evaluate risk propagation over a range of 
-                processors and users with a different backend implementation.
-                
-                Experiments 9 – 13: Evaluate risk propagation over a wider 
-                range of users with a fixed number of processors. The 
-                computed exposure scores are also logged.
+            EXPERIMENTS
 
                 Abbreviations
                     CS:  contact search
@@ -46,19 +38,11 @@ def parse():
                     U:   number of users
                     S:   step size
 
-                1: CS               P = 8       U = 100 – 2.9K    S = 100
-                2: CS               P = 8       U = 3K – 5.4K     S = 100
-                3: CS               P = 8       U = 5.5K – 7.4K   S = 100
-                4: CS               P = 8       U = 7.5K – 8.9K   S = 100
-                5: CS               P = 8       U = 9K – 10K      S = 100
-                6: RP (serial)      P = 1       U = 100 – 1K      S = 100
-                7: RP (lewicki)     P = 1 – 4   U = 100 – 1K      S = 100
-                8: RP (ray)         P = 1 – 4   U = 100 – 1K      S = 100
-                9: RP (ray)         P = 4       U = 100 – 2.9K    S = 100
-                10: RP (ray)        P = 4       U = 3K – 5.4K     S = 100
-                11: RP (ray)        P = 4       U = 5.5K – 7.4K   S = 100
-                12: RP (ray)        P = 4       U = 7.5K – 8.9K   S = 100
-                13: RP (ray)        P = 4       U = 9K – 10K      S = 100
+                1: CS               P = 8       U = 1K – 10K    S = 1K
+                2: RP (serial)      P = 1       U = 1K - 10K    S = 1K
+                3: RP (lewicki)     P = 2 – 4   U = 1K – 10K    S = 1K
+                4: RP (ray)         P = 2 – 4   U = 1K – 10K    S = 1K
+                5: RP (ray)         P = 4       U = 1K - 10K    S = 1K
             ''',
         formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('experiment', type=int)
@@ -66,97 +50,89 @@ def parse():
 
 
 def exp1():
-    contact_search(100, 3000)
+    contact_search(1000, 10100, 1000)
 
 
 def exp2():
-    contact_search(3000, 5500)
+    risk_prop(
+        timeout=0.01,
+        impl='serial',
+        ustart=1000,
+        ustop=10100,
+        ustep=1000,
+        wstart=1,
+        wstop=1,
+        wstep=1)
 
 
 def exp3():
-    contact_search(5500, 7500)
+    exp34('lewicki')
 
 
 def exp4():
-    contact_search(7500, 9000)
+    exp34('ray')
 
 
-def exp5():
-    contact_search(9000, 10100)
+def exp34(impl: str):
+    risk_prop(
+        timeout=3,
+        impl=impl,
+        ustart=1000,
+        ustop=10100,
+        ustep=1000,
+        wstart=2,
+        wstop=5,
+        wstep=1)
 
 
-def contact_search(start: int, stop: int, step: int = 100):
-    logger = get_logger('contact-search', start, stop)
-    histories = synthetic.load_histories()
+def contact_search(start: int, stop: int, step: int) -> None:
+    logger = get_logger('contact-search')
+    data = synthetic.create_data(stop - step)
+    hists = data.geohashes()
+    cs = search.ContactSearch(logger=logger, min_dur=15, workers=-1)
     for n in range(start, stop, step):
-        cs = search.ContactSearch(logger=logger, min_dur=900, workers=-1)
-        cs.search(histories[:n])
+        cs.search(hists[:n])
 
 
-def exp6():
-    exp678(timeout=0.001, impl='serial', start=1, stop=2)
-
-
-def exp7():
-    exp678(timeout=3, impl='lewicki', start=2, stop=5)
-
-
-def exp8():
-    exp678(timeout=3, impl='ray', start=2, stop=5)
-
-
-def exp678(timeout: float, impl: str, start: int, stop: int):
-    scores = synthetic.load_scores()
-    histories = synthetic.load_histories()
+def risk_prop(
+        timeout: float,
+        impl: str,
+        ustart: int,
+        ustop: int,
+        ustep: int,
+        wstart: int,
+        wstop: int,
+        wstep: int):
+    data = synthetic.create_data()
+    scores, hists = data.scores, data.geohashes()
     logger = logging.getLogger(f'risk-propagation:{impl}')
-    cs = search.ContactSearch(min_dur=900, workers=-1)
+    cs = search.ContactSearch(min_dur=15, workers=-1)
     if impl == 'ray':
-        rp = propagation.RayRiskPropagation
+        rp = LogExposuresRiskPropagation
     else:
         rp = propagation.RiskPropagation
-    rp = rp(timeout=timeout, logger=logger)
-    for n in range(100, 1100, 100):
-        contacts = cs.search(histories[:n])
-        for p in range(start, stop):
-            rp = propagation.RayRiskPropagation(
-                timeout=timeout, logger=logger, parts=p)
+    for n in range(ustart, ustop, ustep):
+        contacts = cs.search(hists[:n])
+        for w in range(wstart, wstop, wstep):
+            rp = rp(timeout=timeout, logger=logger, workers=w, tol=0.3)
             rp.setup(scores[:n], contacts)
             rp.run()
 
 
-def exp9():
-    exp9_13(100, 3000)
-
-
-def exp10():
-    exp9_13(3000, 5500)
-
-
-def exp11():
-    exp9_13(5500, 7500)
-
-
-def exp12():
-    exp9_13(7500, 9000)
-
-
-def exp13():
-    exp9_13(9000, 10100)
-
-
-def exp9_13(start: int, stop: int, step: int = 100):
-    scores = synthetic.load_scores()
-    logger = get_logger('risk-propagation', start, stop)
-    contacts = synthetic.load_contacts()
-    for n, t in itertools.product(range(start, stop, step), range(1, 11)):
-        rp = LogExposuresRiskPropagation(
-            tol=round(t / 10, 1), timeout=3, logger=logger)
-        rp.setup(scores[:n], contacts[:n])
+def exp5():
+    data = synthetic.create_data()
+    scores, hists = data.scores, data.geohashes()
+    logger = get_logger('risk-propagation:tolerance')
+    cs = search.ContactSearch(min_dur=15, workers=-1)
+    for n, t in np.arange(0.1, 1.1, 0.1):
+        contacts = cs.search(hists[:n])
+        rp = propagation.RayRiskPropagation(tol=t, timeout=3, logger=logger)
+        rp.setup(scores[:n], contacts)
         rp.run()
 
 
-def get_logger(algorithm: str, start: int, stop: int):
-    return logging.getLogger(f'{algorithm}:{start}-{stop - 100}')
+def get_logger(name: str):
+    return logging.getLogger(name)
 
 
 def main():
@@ -173,12 +149,12 @@ def cs_main():
 
 def rp_main():
     logger = logging.getLogger()
-    dataset = synthetic.create_data(100, low=-0.01, high=0.01, save=False)
+    dataset = synthetic.create_data(1000, low=-1, high=1, save=False)
     cs = search.ContactSearch(
         logger=logger, min_dur=15, tol=200, workers=-1, verbose=1)
     contacts = cs.search(dataset.geohashes())
-    rp = propagation.RiskPropagation(
-        logger=logger, workers=1, timeout=0.01, tol=0.3)
+    rp = propagation.RayRiskPropagation(
+        logger=logger, workers=4, timeout=0.01, tol=0.3)
     rp.setup(dataset.scores, contacts)
     rp.run()
 
