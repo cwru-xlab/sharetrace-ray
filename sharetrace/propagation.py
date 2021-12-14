@@ -303,7 +303,7 @@ class RiskPropagation(BaseActorSystem):
         """Create the graph, log statistics, and send symptom scores."""
         assert len(scores) > 0 and len(contacts) > 0
         self._log_id = str(uuid.uuid4())
-        graph, parts = self.create_graph(scores, contacts)
+        graph, parts, _ = self.create_graph(scores, contacts)
         self.send(parts)
 
     def run(self) -> Array:
@@ -354,7 +354,7 @@ class RiskPropagation(BaseActorSystem):
             self,
             scores: NpSeq,
             contacts: Array
-    ) -> Tuple[Graph, Sequence[NpMap]]:
+    ) -> Tuple[Graph, Sequence[NpMap], Array]:
         self._index(scores, contacts)
         graph, adj, n2i = self._build_graph(contacts)
         n2p = self.partition(adj)
@@ -363,7 +363,7 @@ class RiskPropagation(BaseActorSystem):
         self._connect(graph)
         parts = self._group(scores, {i: p for i, p in zip(n2i, n2p)})
         self._log_stats(len(contacts), graph)
-        return graph, parts
+        return graph, parts, n2p
 
     def _index(self, scores: NpSeq, contacts: Array) -> None:
         # Assumes a name corresponds to an index in scores.
@@ -482,9 +482,9 @@ class RayRiskPropagation(RiskPropagation):
             self,
             scores: NpSeq,
             contacts: Array
-    ) -> Tuple[ObjectRef, Sequence[NpMap]]:
-        graph, parts = super().create_graph(scores, contacts)
-        return ray.put(graph), parts
+    ) -> Tuple[ObjectRef, Sequence[NpMap], Array]:
+        graph, parts, n2p = super().create_graph(scores, contacts)
+        return ray.put(graph), parts, n2p
 
     def run(self) -> Any:
         # No need to use a queue since Ray actors can return data.
