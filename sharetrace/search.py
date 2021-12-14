@@ -11,7 +11,7 @@ from sklearn import neighbors
 from sharetrace import model, util
 
 Array = np.ndarray
-NDArrays = Sequence[Array]
+Arrays = Sequence[Array]
 Histories = Sequence[np.void]
 
 # Source: https://nssdc.gsfc.nasa.gov/planetary/factsheet/earthfact.html
@@ -34,7 +34,7 @@ class ContactSearch:
             min_dur: float = 0,
             r: float = 1e-4,
             leaf_size: int = 10,
-            tol: float = 1,
+            tol: float = 200,
             workers: int = 1,
             verbose: int = 0,
             logger: Optional[logging.Logger] = None):
@@ -68,7 +68,7 @@ class ContactSearch:
         self.log(len(histories), len(contacts), timer.seconds)
         return (contacts, pairs) if return_pairs else contacts
 
-    def _search(self, histories: Histories) -> NDArrays:
+    def _search(self, histories: Histories) -> Arrays:
         pairs, locs = self.select(histories)
         # For loky backend, use batch_size = 500; 'auto' is slow.
         # No difference in speed between 'threads' and 'processes' backend.
@@ -98,7 +98,7 @@ class ContactSearch:
             self,
             pair: Array,
             histories: Histories,
-            locs: NDArrays
+            locs: Arrays
     ) -> Optional[np.void]:
         u1, u2 = pair
         hist1, hist2 = histories[u1], histories[u2]
@@ -141,7 +141,7 @@ def to_latlongs(history: np.void) -> Array:
     return np.radians(model.to_coords(history)['locs']['loc'])
 
 
-def flatten(arrays: NDArrays) -> NDArrays:
+def flatten(arrays: Arrays) -> Arrays:
     """Return a flat concatenation and an index to map back to seq indices. """
     idx = np.repeat(np.arange(len(arrays)), repeats=[len(a) for a in arrays])
     return np.concatenate(arrays), idx
@@ -154,7 +154,7 @@ def get_intervals(a: Array) -> Array:
     return np.array([(c[0], c[-1] + 1) for c in chunks], dtype=np.int64)
 
 
-def resample(times: Array, locs: Array) -> NDArrays:
+def resample(times: Array, locs: Array) -> Arrays:
     """Resamples the times and locations to be at the minute-resolution."""
     # Second resolution results in really slow performance.
     times = np.int64(times.astype('datetime64[m]'))
@@ -168,7 +168,7 @@ def resample(times: Array, locs: Array) -> NDArrays:
     return new_times, new_locs
 
 
-def pad(times1: Array, locs1: Array, times2: Array, locs2: Array) -> NDArrays:
+def pad(times1: Array, locs1: Array, times2: Array, locs2: Array) -> Arrays:
     """Pads the times and locations based on the union of the time ranges."""
     start = min(times1[0], times2[0])
     end = max(times1[-1], times2[-1])

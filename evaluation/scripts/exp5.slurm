@@ -1,13 +1,14 @@
 #!/bin/bash
 
-#SBATCH --time=24:00:00
+#SBATCH --time=8:00:00
 #SBATCH -p classc -A sxg125_csds438 -N 1 -n 8 --mem=16gb
-#SBATCH --job-name="contact-tracing:exp5"
+#SBATCH --job-name="contact-tracing:exp1"
 #SBATCH --mail-user=rdt46@case.edu
 #SBATCH --mail-type=ALL
 
 EXPERIMENT=5
 PYTHON_VERSION="3.8.6"
+PACKAGE="contact-tracing"
 
 module swap intel gcc
 module load python/$PYTHON_VERSION
@@ -15,13 +16,13 @@ module load python/$PYTHON_VERSION
 export PYTHONUSERBASE=$HOME/.usr/local/python/$PYTHON_VERSION
 mkdir -p $PYTHONUSERBASE
 
-cp ~/contact-tracing $PFSDIR
+cp ~/$PACKAGE $PFSDIR
 cd $PFSDIR
 
 pip install --upgrade pip
-pip install -r ~/contact-tracing/requirements.txt --user
-pip install -e ~/contact-tracing
+pip install -r ~/$PACKAGE/requirements.txt --user
+pip install -e ~/$PACKAGE
 
-cd ~/contact-tracing/evaluation
+cd ~/$PACKAGE/evaluation
 
 python3 eval.py $EXPERIMENT

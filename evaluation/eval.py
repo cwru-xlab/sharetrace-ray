@@ -1,9 +1,10 @@
 import argparse
+import itertools
 import json
 import logging
 from logging import config
 
-import numpy as np
+import tqdm
 
 import synthetic
 from sharetrace import propagation, search, util
@@ -50,7 +51,7 @@ def parse():
 
 
 def exp1():
-    contact_search(1000, 10100, 1000)
+    contact_search(1000, 11000, 1000)
 
 
 def exp2():
@@ -58,10 +59,10 @@ def exp2():
         timeout=0.01,
         impl='serial',
         ustart=1000,
-        ustop=10100,
+        ustop=11000,
         ustep=1000,
         wstart=1,
-        wstop=1,
+        wstop=2,
         wstep=1)
 
 
@@ -78,7 +79,7 @@ def exp34(impl: str):
         timeout=3,
         impl=impl,
         ustart=1000,
-        ustop=10100,
+        ustop=11000,
         ustep=1000,
         wstart=2,
         wstop=5,
@@ -86,12 +87,14 @@ def exp34(impl: str):
 
 
 def contact_search(start: int, stop: int, step: int) -> None:
-    logger = get_logger('contact-search')
-    data = synthetic.create_data(stop - step)
-    hists = data.geohashes()
-    cs = search.ContactSearch(logger=logger, min_dur=15, workers=-1)
-    for n in range(start, stop, step):
-        cs.search(hists[:n])
+    data = synthetic.create_data(stop - step, low=-2, high=2)
+    scores, hists = data.scores, data.geohashes()
+    synthetic.save_scores(scores)
+    synthetic.save_geohashes(hists)
+    cs = new_contact_search(get_logger('contact-search'))
+    for n in tqdm.tqdm(range(start, stop, step)):
+        contacts = cs.search(hists[:n])
+        synthetic.save_contacts(contacts, n)
 
 
 def risk_prop(
@@ -103,61 +106,64 @@ def risk_prop(
         wstart: int,
         wstop: int,
         wstep: int):
-    data = synthetic.create_data()
-    scores, hists = data.scores, data.geohashes()
     logger = logging.getLogger(f'risk-propagation:{impl}')
-    cs = search.ContactSearch(min_dur=15, workers=-1)
-    if impl == 'ray':
-        rp = LogExposuresRiskPropagation
-    else:
-        rp = propagation.RiskPropagation
-    for n in range(ustart, ustop, ustep):
-        contacts = cs.search(hists[:n])
-        for w in range(wstart, wstop, wstep):
-            rp = rp(timeout=timeout, logger=logger, workers=w, tol=0.3)
-            rp.setup(scores[:n], contacts)
-            rp.run()
+    scores = synthetic.load_scores()
+    loop = list(itertools.product(
+        range(ustart, ustop, ustep),
+        range(wstart, wstop, wstep)))
+    for n, w in tqdm.tqdm(loop):
+        if impl == 'ray':
+            rp = LogExposuresRiskPropagation(
+                timeout=timeout, logger=logger, workers=w, tol=0.3)
+        else:
+            rp = propagation.RiskPropagation(
+                timeout=timeout, logger=logger, workers=w, tol=0.3)
+        contacts = synthetic.load_contacts(n)
+        rp.setup(scores[:n], contacts)
+        rp.run()
 
 
 def exp5():
-    data = synthetic.create_data()
-    scores, hists = data.scores, data.geohashes()
+    scores = synthetic.load_scores()
+    contacts = synthetic.load_contacts(10_000)
     logger = get_logger('risk-propagation:tolerance')
-    cs = search.ContactSearch(min_dur=15, workers=-1)
-    for n, t in np.arange(0.1, 1.1, 0.1):
-        contacts = cs.search(hists[:n])
-        rp = propagation.RayRiskPropagation(tol=t, timeout=3, logger=logger)
-        rp.setup(scores[:n], contacts)
+    for t in tqdm.tqdm(range(1, 11, 1)):
+        rp = propagation.RayRiskPropagation(
+            tol=round(t / 10, 1), timeout=3, logger=logger)
+        rp.setup(scores, contacts)
         rp.run()
+
+
+def new_contact_search(logger=None):
+    return search.ContactSearch(min_dur=15, tol=200, workers=-1, logger=logger)
 
 
 def get_logger(name: str):
     return logging.getLogger(name)
 
 
-def main():
-    eval(f'exp{parse().experiment}()')
+def main(e=None):
+    if e is None:
+        e = parse().experiment
+    eval(f'exp{e}()')
 
 
 def cs_main():
-    logger = logging.getLogger()
     dataset = synthetic.create_data(5000, low=-2, high=2, save=False)
-    cs = search.ContactSearch(
-        logger=logger, min_dur=15, tol=200, workers=-1, verbose=2)
+    cs = new_contact_search(logging.getLogger())
     contacts = cs.search(dataset.geohashes())
 
 
 def rp_main():
     logger = logging.getLogger()
-    dataset = synthetic.create_data(1000, low=-1, high=1, save=False)
-    cs = search.ContactSearch(
-        logger=logger, min_dur=15, tol=200, workers=-1, verbose=1)
+    dataset = synthetic.create_data(1000, low=-2, high=2, save=False)
+    cs = new_contact_search()
     contacts = cs.search(dataset.geohashes())
     rp = propagation.RayRiskPropagation(
-        logger=logger, workers=4, timeout=0.01, tol=0.3)
+        logger=logger, workers=2, timeout=3, tol=0.3)
     rp.setup(dataset.scores, contacts)
     rp.run()
 
 
 if __name__ == '__main__':
-    rp_main()
+    main()

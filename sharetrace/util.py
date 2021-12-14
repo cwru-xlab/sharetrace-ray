@@ -22,7 +22,9 @@ LOGGERS = (
     'risk-propagation:tolerance')
 
 
-def logging_config():
+def logging_config(clear=False):
+    if clear and os.path.exists(LOGS_DIR):
+        os.rmdir(LOGS_DIR)
     if not os.path.exists(LOGS_DIR):
         os.mkdir(LOGS_DIR)
 

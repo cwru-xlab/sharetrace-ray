@@ -20,6 +20,7 @@ VALUES_FILENAME = 'data//values.npy'
 SCORES_FILENAME = 'data//scores.npy'
 LOCATIONS_FILENAME = 'data//locations.npy'
 HISTORIES_FILENAME = 'data//histories.npy'
+GEOHASHES_FILENAME = 'data//geohashes.npy'
 CONTACTS_FILE_FORMAT = 'data//contacts:{}.npy'
 
 try:
@@ -157,7 +158,7 @@ def save_contacts(contacts, n: int):
     save_data(CONTACTS_FILE_FORMAT.format(n), contacts)
 
 
-def load_contacts(n: int = None):
+def load_contacts(n: int):
     return load(CONTACTS_FILE_FORMAT.format(n))
 
 
@@ -202,6 +203,14 @@ def load_histories(n=None, geohashes: bool = True, prec: int = 8):
     if geohashes:
         histories = to_geohashes(histories, prec)
     return histories
+
+
+def save_geohashes(geohashes):
+    save_data(GEOHASHES_FILENAME, geohashes)
+
+
+def load_geohashes(n=None):
+    load(GEOHASHES_FILENAME, n)
 
 
 def save_data(filename: str, arr: np.ndarray):
