@@ -1,15 +1,13 @@
 import collections
-import copy
 import itertools
 import json
 import logging
 import queue
 import time
 import timeit
-import uuid
 from enum import Enum
 from typing import (
-    Any, Collection, Dict, Hashable, Mapping, MutableMapping, Optional,
+    Any, Collection, Hashable, Mapping, MutableMapping, Optional,
     Sequence, Tuple, Type, Union
 )
 
@@ -117,7 +115,7 @@ class Partition(BaseActor):
         updates = updates[updates != 0]
         logged = {
             'Name': self.name,
-            'RuntimeInSec': approx(runtime),
+            'RuntimeInSeconds': approx(runtime),
             'Messages': self._msgs,
             'Nodes': len(nodes),
             'NodeDataInMb': approx(util.get_mb(nodes)),
