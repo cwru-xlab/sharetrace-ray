@@ -91,7 +91,8 @@ class ActorSystem(Actor):
                 add(a1)
                 add(a2)
             else:
-                raise TypeError('Input must be an Actor or a pair of Actors.')
+                raise TypeError(
+                    f'Input must be an Actor or a pair of Actors; got {a}')
 
     def __repr__(self):
         cls = self.__class__.__name__
