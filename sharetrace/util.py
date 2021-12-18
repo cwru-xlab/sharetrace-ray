@@ -128,3 +128,7 @@ def get_bytes(obj, seen=None):
 
 def approx(val):
     return val if val is None else round(float(val), 4)
+
+
+def sdiv(a, b) -> float:
+    return 0 if b == 0 else a / b

@@ -8,19 +8,19 @@ import tqdm
 
 import synthetic
 from sharetrace import propagation, search, util
-from sharetrace.propagation import Array
+from sharetrace.propagation import Array, NpSeq
 
 logging.config.dictConfig(util.logging_config())
 
 
-class LogExposuresRiskPropagation(propagation.RayRiskPropagation):
+class LogExposuresRiskPropagation(propagation.RiskPropagation):
     __slots__ = ()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def run(self) -> Array:
-        results = super().run()
+    def run(self, scores: NpSeq, contacts: Array) -> Array:
+        results = super().run(scores, contacts)
         self.logger.info(json.dumps({'ExposureScores': results.tolist()}))
         return results
 
@@ -119,7 +119,7 @@ def risk_prop(
             rp = propagation.RiskPropagation(
                 timeout=timeout, logger=logger, workers=w, tol=0.3)
         contacts = synthetic.load_contacts(n)
-        rp.setup(scores[:n], contacts)
+        rp.on_start(scores[:n], contacts)
         rp.run()
 
 
@@ -130,7 +130,7 @@ def exp5():
     for t in tqdm.tqdm(range(1, 11, 1)):
         rp = propagation.RayRiskPropagation(
             tol=round(t / 10, 1), timeout=3, logger=logger)
-        rp.setup(scores, contacts)
+        rp.on_start(scores, contacts)
         rp.run()
 
 
@@ -156,14 +156,14 @@ def cs_main():
 
 def rp_main():
     logger = logging.getLogger()
-    dataset = synthetic.create_data(1000, low=-2, high=2, save=False)
+    dataset = synthetic.create_data(3000, low=-2, high=2, save=False)
     cs = new_contact_search()
     contacts = cs.search(dataset.geohashes())
-    rp = propagation.RayRiskPropagation(
-        logger=logger, workers=2, timeout=3, tol=0.3)
-    rp.setup(dataset.scores, contacts)
-    rp.run()
+    for w in range(1, 5):
+        rp = propagation.RiskPropagation(
+            logger=logger, workers=w, timeout=3, tol=0.3)
+        rp.run(dataset.scores, contacts)
 
 
 if __name__ == '__main__':
-    main()
+    rp_main()
