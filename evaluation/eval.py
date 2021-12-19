@@ -89,8 +89,7 @@ def exp34(impl: str):
 def contact_search(start: int, stop: int, step: int) -> None:
     data = synthetic.create_data(stop - step, low=-2, high=2)
     scores, hists = data.scores, data.geohashes()
-    synthetic.save_scores(scores)
-    synthetic.save_geohashes(hists)
+    data.save(prec=8)
     cs = new_contact_search(get_logger('contact-search'))
     for n in tqdm.tqdm(range(start, stop, step)):
         contacts = cs.search(hists[:n])
@@ -107,7 +106,7 @@ def risk_prop(
         wstop: int,
         wstep: int):
     logger = logging.getLogger(f'risk-propagation:{impl}')
-    scores = synthetic.load_scores()
+    scores = synthetic.Dataset.load('.\\data').scores
     loop = list(itertools.product(
         range(ustart, ustop, ustep),
         range(wstart, wstop, wstep)))
@@ -119,19 +118,17 @@ def risk_prop(
             rp = propagation.RiskPropagation(
                 timeout=timeout, logger=logger, workers=w, tol=0.3)
         contacts = synthetic.load_contacts(n)
-        rp.on_start(scores[:n], contacts)
-        rp.run()
+        rp.run(scores[:n], contacts)
 
 
 def exp5():
-    scores = synthetic.load_scores()
+    scores = synthetic.Dataset.load('.\\data').scores
     contacts = synthetic.load_contacts(10_000)
     logger = get_logger('risk-propagation:tolerance')
     for t in tqdm.tqdm(range(1, 11, 1)):
-        rp = propagation.RayRiskPropagation(
+        rp = propagation.RiskPropagation(
             tol=round(t / 10, 1), timeout=3, logger=logger)
-        rp.on_start(scores, contacts)
-        rp.run()
+        rp.run(scores, contacts)
 
 
 def new_contact_search(logger=None):

@@ -2,8 +2,11 @@ import logging
 import os
 import random
 import warnings
+from abc import ABC, abstractmethod
 from datetime import datetime
+from functools import lru_cache
 from logging import config
+from typing import Optional
 
 import numpy as np
 from scipy import stats
@@ -15,110 +18,223 @@ logging.config.dictConfig(util.logging_config())
 
 rng = np.random.default_rng()
 SEC_PER_DAY = 86400
-MIN_PER_HR = 3600
-TIMES_FILENAME = 'data//times.npy'
-VALUES_FILENAME = 'data//values.npy'
-SCORES_FILENAME = 'data//scores.npy'
-LOCATIONS_FILENAME = 'data//locations.npy'
-HISTORIES_FILENAME = 'data//histories.npy'
-GEOHASHES_FILENAME = 'data//geohashes.npy'
 CONTACTS_FILE_FORMAT = 'data//contacts:{}.npy'
 
-try:
-    os.mkdir('./data')
-except FileExistsError:
-    pass
+
+def save_contacts(contacts, n: int):
+    save_data(CONTACTS_FILE_FORMAT.format(n), contacts)
 
 
-def walk(
-        n: int,
-        low: float = -1,
-        high: float = 1,
-        step_low: float = -0.1,
-        step_high: float = 0.1,
-        xinit: float = 0,
-        yinit: float = 0):
-    xy = np.zeros((2, n))
-    xy[:, 0] = np.clip((xinit, yinit), low, high)
-    delta = rng.uniform(step_low, step_high, size=(2, n))
-    for i in range(1, n):
-        xy[:, i] = np.clip(xy[:, i - 1] + delta[:, i], low, high)
-    return xy
+def load_contacts(n: int):
+    return load(CONTACTS_FILE_FORMAT.format(n))
 
 
-def create_locs(n: int, days: int, per_day: int, dist, **kwargs):
-    steps = num_points(days, per_day)
-    locs = np.zeros((n, 2, steps))
-    for i in range(n):
-        xinit, yinit = dist(2)
-        locs[i, ::] = walk(steps, xinit=xinit, yinit=yinit, **kwargs)
-    return locs
+def save_data(file, arr: np.ndarray):
+    warnings.filterwarnings("ignore")
+    np.save(file, arr)
 
 
-def create_times(n: int, now: DateTime, days: int = 14, per_day: int = 16):
-    dt_type, td_type = 'datetime64[s]', 'timedelta64[s]'
-    now = np.datetime64(now).astype(dt_type)
-    times = np.zeros((n, num_points(days, per_day)), dtype=dt_type)
-    offsets = (np.arange(days + 1) * SEC_PER_DAY).astype(td_type)
-    starts = now - offsets
-    for i in range(n):
-        delta = rng.uniform(0, MIN_PER_HR, size=per_day).cumsum()
-        delta = delta.astype(td_type)
-        times[i, :] = np.concatenate([start + delta for start in starts])
-    return times
+def load(filename):
+    return np.load(filename, allow_pickle=True)
 
 
-def take(a, idx, axis):
-    cut = [slice(None)] * a.ndim
-    cut[axis] = idx
-    return a[tuple(cut)]
+class DataFactory(ABC):
+    __slots__ = ()
+
+    def __init__(self):
+        super().__init__()
+
+    @abstractmethod
+    def __call__(self, users: int):
+        pass
 
 
-def create_values(users: int, per_user: int = 15, p: float = 0.5):
-    indicator = stats.bernoulli.rvs(p, size=users)
-    replace = np.flatnonzero(indicator)
-    values = rng.uniform(0, 0.5, size=(users, per_user))
-    values[replace] = rng.uniform(0.5, 1, size=(len(replace), per_user))
-    return values
+class UniformBernoulliValueFactory(DataFactory):
+    __slots__ = ('per_user', 'p')
+
+    def __init__(self, per_user: float = 15, p: float = 0.5):
+        assert 0 <= p <= 1
+        assert per_user > 0
+        super().__init__()
+        self.per_user = per_user
+        self.p = p
+
+    def __call__(self, users: int):
+        per_user = self.per_user
+        indicator = stats.bernoulli.rvs(self.p, size=users)
+        replace = np.flatnonzero(indicator)
+        values = rng.uniform(0, 0.5, size=(users, per_user))
+        values[replace] = rng.uniform(0.5, 1, size=(len(replace), per_user))
+        return values
 
 
-def num_points(days, per_day):
-    return (days + 1) * per_day
+class TimeFactory(DataFactory):
+    __slots__ = ('days', 'per_day', 'now')
+
+    def __init__(
+            self,
+            days: int = 15,
+            per_day: int = 16,
+            now: Optional[DateTime] = None):
+        assert days > 0
+        assert per_day > 0
+        super().__init__()
+        self.days = days
+        self.per_day = per_day
+        self.now = now or datetime.utcnow()
+
+    def __call__(self, users: int):
+        create_delta, concat = self.create_delta, np.concatenate
+        dt_type, td_type = 'datetime64[s]', 'timedelta64[s]'
+        now = np.datetime64(self.now).astype(dt_type)
+        offsets = (np.arange(self.days) * SEC_PER_DAY).astype(td_type)
+        starts = now - offsets
+        times = np.zeros((users, self.days * self.per_day), dtype=dt_type)
+        for i in range(users):
+            delta = create_delta().astype(td_type)
+            times[i, :] = concat([start + delta for start in starts])
+        return times
+
+    def create_delta(self):
+        deltas = rng.uniform(0, SEC_PER_DAY / self.per_day, size=self.per_day)
+        return deltas.cumsum()
 
 
-def to_scores(values, times):
-    scores = []
-    for uvals, utimes in zip(values, times):
-        scores.append([model.risk_score(v, t) for v, t in zip(uvals, utimes)])
-    return np.array(scores)
+class RandomWalkLocationFactory(DataFactory):
+    __slots__ = (
+        'days',
+        'per_day',
+        'low',
+        'high',
+        'step_low',
+        'step_high')
 
+    def __init__(
+            self,
+            days: int = 15,
+            per_day: int = 16,
+            low: float = -1,
+            high: float = 1,
+            step_low: float = -0.01,
+            step_high: float = 0.01):
+        assert days > 0
+        assert per_day > 0
+        assert low < high
+        assert step_low < step_high
+        super().__init__()
+        self.days = days
+        self.per_day = per_day
+        self.low = low
+        self.high = high
+        self.step_low = step_low
+        self.step_high = step_high
 
-def to_histories(locs, times):
-    histories = []
-    for u, (utimes, ulocs) in enumerate(zip(times, locs)):
-        tlocs = [
-            model.temporal_loc(loc, time) for time, loc in zip(utimes, ulocs.T)]
-        histories.append(model.history(tlocs, u))
-    return np.array(histories)
+    def __call__(self, users: int):
+        locs = np.zeros((users, 2, self.steps()))
+        walk = self.walk
+        for i in range(users):
+            locs[i, ::] = walk()
+        return locs
 
+    def steps(self):
+        return self.days * self.per_day
 
-def to_geohashes(histories, prec: int = 8):
-    convert = model.to_geohashes
-    return [convert(h, prec) for h in histories]
+    def walk(self):
+        clip = np.clip
+        low, high = self.low, self.high
+        (x0, y0), steps, delta = self.x0y0(), self.steps(), self.delta()
+        xy = np.zeros((2, steps))
+        xy[:, 0] = clip((x0, y0), low, high)
+        for i in range(1, steps):
+            xy[:, i] = clip(xy[:, i - 1] + delta[:, i], low, high)
+        return xy
+
+    def x0y0(self):
+        loc = abs(self.high) - abs(self.low)
+        scale = np.sqrt((self.high - self.low) / 2)
+        return stats.norm(loc, scale).rvs(size=2)
+
+    def delta(self):
+        steps = self.steps()
+        return rng.uniform(self.step_low, self.step_high, size=(2, steps))
 
 
 class Dataset:
-    __slots__ = ('times', 'values', 'locs', 'scores', 'histories')
+    __slots__ = ('scores', 'histories')
 
-    def __init__(self, times, values, locs, scores, histories):
-        self.times = times
-        self.values = values
-        self.locs = locs
+    def __init__(self, scores, histories):
         self.scores = scores
         self.histories = histories
 
+    @lru_cache
     def geohashes(self, prec: int = 8):
-        return to_geohashes(self.histories, prec)
+        return model.to_geohashes(*self.histories, prec=prec)
+
+    def save(self, path: str = '.'):
+        self._mkdir(path)
+        save_data(self._scores_file(path), self.scores)
+        save_data(self._histories_file(path), self.histories)
+
+    @staticmethod
+    def _mkdir(path: str):
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            pass
+
+    @classmethod
+    def load(cls, path: str = '.'):
+        scores = load(Dataset._scores_file(path))
+        histories = load(Dataset._histories_file(path))
+        return Dataset(scores, histories)
+
+    @staticmethod
+    def _scores_file(path: str):
+        return os.path.join(path, 'scores.npy')
+
+    @staticmethod
+    def _histories_file(path: str):
+        return os.path.join(path, 'histories.npy')
+
+
+class DatasetFactory(DataFactory):
+    __slots__ = ('value_factory', 'time_factory', 'loc_factory')
+
+    def __init__(
+            self,
+            value_factory: DataFactory,
+            time_factory: DataFactory,
+            loc_factory: DataFactory):
+        super().__init__()
+        self.value_factory = value_factory
+        self.time_factory = time_factory
+        self.loc_factory = loc_factory
+
+    def __call__(self, users: int) -> Dataset:
+        values = self.value_factory(users)
+        times = self.time_factory(users)
+        locs = self.loc_factory(users)
+        scores = self.scores(values, times)
+        histories = self.histories(locs, times)
+        return Dataset(scores, histories)
+
+    @staticmethod
+    def scores(values, times):
+        scores = []
+        risk_score, append = model.risk_score, scores.append
+        for uvals, utimes in zip(values, times):
+            append([risk_score(v, t) for v, t in zip(uvals, utimes)])
+        return np.array(scores)
+
+    @staticmethod
+    def histories(locs, times):
+        histories = []
+        append = histories.append
+        tloc, history = model.temporal_loc, model.history
+        for u, (utimes, ulocs) in enumerate(zip(times, locs)):
+            tlocs = [tloc(loc, time) for time, loc in zip(utimes, ulocs.T)]
+            append(history(tlocs, u))
+        return np.array(histories)
 
 
 class GaussianMixture:
@@ -138,7 +254,7 @@ class GaussianMixture:
 
 def create_data(
         users: int = 10_000,
-        days: int = 14,
+        days: int = 15,
         per_day: int = 16,
         low: float = -1,
         high: float = 1,
@@ -146,98 +262,19 @@ def create_data(
         step_high: float = 0.01,
         p: float = 0.2,
         save: bool = False):
-    times = create_times(users, datetime.now(), days, per_day)
-    loc = abs(high) - abs(low)
-    scale = np.sqrt((high - low) / 2)
-    dist = GaussianMixture([-3, 3], [0.1, 0.1], [0.5, 0.5])
-    locs = create_locs(
-        users,
+    time_factory = TimeFactory(days, per_day)
+    value_factory = UniformBernoulliValueFactory(days, p)
+    loc_factory = RandomWalkLocationFactory(
         days=days,
         per_day=per_day,
-        dist=dist,
-        low=-5,
-        high=5,
+        low=low,
+        high=high,
         step_low=step_low,
         step_high=step_high)
-    values = create_values(users, per_user=days + 1, p=p)
-    scores = to_scores(values, times)
-    histories = to_histories(locs, times)
+    dataset_factory = DatasetFactory(
+        value_factory=value_factory,
+        time_factory=time_factory,
+        loc_factory=loc_factory)
+    dataset = dataset_factory(users)
     if save:
-        save_times(times)
-        save_values(values)
-        save_locations(locs)
-        save_scores(scores)
-        save_histories(histories)
-    return Dataset(times, values, locs, scores, histories)
-
-
-def save_contacts(contacts, n: int):
-    save_data(CONTACTS_FILE_FORMAT.format(n), contacts)
-
-
-def load_contacts(n: int):
-    return load(CONTACTS_FILE_FORMAT.format(n))
-
-
-def save_times(times):
-    save_data(TIMES_FILENAME, times)
-
-
-def load_times(n=None):
-    return load(TIMES_FILENAME, n)
-
-
-def save_values(values):
-    save_data(VALUES_FILENAME, values)
-
-
-def load_values(n=None):
-    return load(VALUES_FILENAME, n)
-
-
-def save_scores(scores):
-    save_data(SCORES_FILENAME, scores)
-
-
-def load_scores(n=None):
-    return load(SCORES_FILENAME, n)
-
-
-def save_locations(locations):
-    save_data(LOCATIONS_FILENAME, locations)
-
-
-def load_locations(n=None):
-    return load(LOCATIONS_FILENAME, n)
-
-
-def save_histories(histories):
-    save_data(HISTORIES_FILENAME, histories)
-
-
-def load_histories(n=None, geohashes: bool = True, prec: int = 8):
-    histories = load(HISTORIES_FILENAME, n)
-    if geohashes:
-        histories = to_geohashes(histories, prec)
-    return histories
-
-
-def save_geohashes(geohashes):
-    save_data(GEOHASHES_FILENAME, geohashes)
-
-
-def load_geohashes(n=None):
-    load(GEOHASHES_FILENAME, n)
-
-
-def save_data(filename: str, arr: np.ndarray):
-    warnings.filterwarnings("ignore")
-    np.save(filename, arr)
-
-
-def load(filename, n=None):
-    return np.load(filename, allow_pickle=True)[:n]
-
-
-if __name__ == '__main__':
-    create_data(1000, low=-0.5, high=0.5, p=0.3, save=True)
+        dataset.save('.//data')

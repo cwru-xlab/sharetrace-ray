@@ -6,10 +6,11 @@ import pygeohash
 from sharetrace.util import DateTime, TimeDelta
 
 ArrayLike = Union[Sequence, Tuple, np.ndarray]
+Struct = np.void
 LatLong = Tuple[float, float]
 
 
-def risk_score(val: float, time: DateTime) -> np.void:
+def risk_score(val: float, time: DateTime) -> Struct:
     """Creates a timestamped risk probability.
 
     Args:
@@ -25,14 +26,14 @@ def risk_score(val: float, time: DateTime) -> np.void:
 
 
 @overload
-def temporal_loc(loc: LatLong, time: DateTime) -> np.void: ...
+def temporal_loc(loc: LatLong, time: DateTime) -> Struct: ...
 
 
 @overload
-def temporal_loc(loc: str, time: DateTime) -> np.void: ...
+def temporal_loc(loc: str, time: DateTime) -> Struct: ...
 
 
-def temporal_loc(loc: Union[str, LatLong], time: DateTime) -> np.void:
+def temporal_loc(loc: Union[str, LatLong], time: DateTime) -> Struct:
     """Creates a temporal location.
 
         Args:
@@ -50,32 +51,39 @@ def temporal_loc(loc: Union[str, LatLong], time: DateTime) -> np.void:
     return np.array([(loc, time)], dtype=dt)[0]
 
 
-def to_geohash(coord: np.void, prec: int = 12) -> np.void:
+def to_geohash(coord: Struct, prec: int = 12) -> Struct:
     """Converts the coordinates of the temporal location into a geohash."""
     lat, long = coord['loc']
     geohash = pygeohash.encode(lat, long, prec)
     return temporal_loc(geohash, coord['time'])
 
 
-def to_geohashes(hist: np.void, prec: int = 12) -> np.void:
+def to_geohashes(*hists: Struct, prec: int = 12) -> Union[Struct, Sequence]:
     """Converts the coordinates of the location history into geohashes."""
-    geohashes = [to_geohash(coord, prec) for coord in hist['locs']]
-    return history(geohashes, hist['name'])
+    assert 0 < prec < 13
+    converted = []
+    append = converted.append
+    for hist in hists:
+        geohashes = [to_geohash(coord, prec) for coord in hist['locs']]
+        append(history(geohashes, hist['name']))
+    if len(hists) == 1:
+        converted = converted[0]
+    return converted
 
 
-def to_coords(hist: np.void) -> np.void:
+def to_coords(hist: Struct) -> Struct:
     """Converts the geohashes of the location history into coordinates."""
     coords = [to_coord(geohash) for geohash in hist['locs']]
     return history(coords, hist['name'])
 
 
-def to_coord(geohash: np.void) -> np.void:
+def to_coord(geohash: Struct) -> Struct:
     """Converts the geohash of the temporal location into coordinates."""
     lat, long = pygeohash.decode(geohash['loc'])
     return temporal_loc((lat, long), geohash['time'])
 
 
-def contact(names: ArrayLike, time: DateTime, dur: TimeDelta) -> np.void:
+def contact(names: ArrayLike, time: DateTime, dur: TimeDelta) -> Struct:
     """Creates a named event.
 
     Args:
@@ -95,7 +103,7 @@ def contact(names: ArrayLike, time: DateTime, dur: TimeDelta) -> np.void:
     return np.array([(names, time, dur)], dtype=dt)[0]
 
 
-def history(locs: ArrayLike, name: int) -> np.void:
+def history(locs: ArrayLike, name: int) -> Struct:
     """Creates a named and sorted location history.
 
     Args:
@@ -115,7 +123,7 @@ def message(
         src: int,
         sgroup: int,
         dest: int,
-        dgroup: int) -> np.void:
+        dgroup: int) -> Struct:
     """Creates a message used for passing information between objects.
 
     Args:
@@ -137,7 +145,7 @@ def message(
     return np.array([(val, src, sgroup, dest, dgroup)], dtype=dt)[0]
 
 
-def node(ne: ArrayLike, group: int) -> np.void:
+def node(ne: ArrayLike, group: int) -> Struct:
     """Creates a graph node.
 
     Args:
