@@ -18,7 +18,6 @@ from ray import ObjectRef
 
 from sharetrace import model, queue, util
 from sharetrace.actors import Actor, ActorSystem
-from sharetrace.util import approx, sdiv
 
 Array = np.ndarray
 NpSeq = Sequence[np.ndarray]
@@ -42,9 +41,12 @@ def initial(scores: Array) -> np.void:
 
 
 class StopCondition(Enum):
-    EARLY_STOP = 'early_stop'
-    TIMED_OUT = 'timed_out'
-    MAX_DURATION = 'max_duration'
+    EARLY_STOP = 'EarlyStop'
+    TIMED_OUT = 'TimedOut'
+    MAX_DURATION = 'MaxDuration'
+
+    def data(self, x):
+        return self, x
 
 
 @dataclass(frozen=True)
@@ -67,16 +69,17 @@ class WorkerLog:
     std_updates: float
 
     @classmethod
-    def summarize(cls, *logs: 'WorkerLog') -> Mapping[str, Any]:
+    def summarize(cls, *logs: 'WorkerLog') -> Mapping[str, float]:
+        approx, sdiv = util.approx, util.sdiv
         updates = sum(w.updates for w in logs)
         return {
-            'RuntimeInSeconds': max(w.runtime for w in logs),
+            'RuntimeInSeconds': approx(max(w.runtime for w in logs)),
             'Messages': sum(w.messages for w in logs),
             'Nodes': sum(w.nodes for w in logs),
-            'NodeDataInMb': sum(w.node_data for w in logs),
+            'NodeDataInMb': approx(sum(w.node_data for w in logs)),
             'Updates': sum(w.updates for w in logs),
-            'MinUpdate': min(w.min_update for w in logs),
-            'MaxUpdate': max(w.max_update for w in logs),
+            'MinUpdate': approx(min(w.min_update for w in logs)),
+            'MaxUpdate': approx(max(w.max_update for w in logs)),
             'AvgUpdate': approx(
                 sdiv(sum(w.updates * w.avg_update for w in logs), updates)),
             'MinUpdates': min(w.min_updates for w in logs),
@@ -85,23 +88,24 @@ class WorkerLog:
                 sdiv(sum(w.updates * w.avg_updates for w in logs), updates))}
 
     def format(self) -> Mapping[str, Any]:
+        approx = util.approx
         return {
             'Name': self.name,
-            'RuntimeInSeconds': self.runtime,
-            'Messages': self.messages,
-            'Nodes': self.nodes,
-            'NodeDataInMb': self.node_data,
-            'Updates': self.updates,
+            'RuntimeInSeconds': approx(self.runtime),
+            'Messages': int(self.messages),
+            'Nodes': int(self.nodes),
+            'NodeDataInMb': approx(self.node_data),
+            'Updates': int(self.updates),
             'StopCondition': self.stop_condition.name,
-            'StopData': self.stop_data,
-            'MinUpdate': self.min_update,
-            'MaxUpdate': self.max_update,
-            'AvgUpdate': self.avg_update,
-            'StdUpdate': self.std_update,
-            'MinUpdates': self.min_updates,
-            'MaxUpdates': self.max_updates,
-            'AvgUpdates': self.avg_updates,
-            'StdUpdates': self.std_updates}
+            'StopData': approx(self.stop_data),
+            'MinUpdate': approx(self.min_update),
+            'MaxUpdate': approx(self.max_update),
+            'AvgUpdate': approx(self.avg_update),
+            'StdUpdate': approx(self.std_update),
+            'MinUpdates': int(self.min_updates),
+            'MaxUpdates': int(self.max_updates),
+            'AvgUpdates': approx(self.avg_updates),
+            'StdUpdates': approx(self.std_updates)}
 
 
 class Result:
@@ -179,7 +183,7 @@ class _Partition(Actor):
         self._init_done = False
         self._timed_out = False
         self._msgs = 0
-        self._stop_condition: Tuple[StopCondition, float] = tuple()
+        self._stop_condition: Tuple[StopCondition, Any] = tuple()
 
     def run(self) -> Result:
         runtime = util.time(self._run).seconds
@@ -202,12 +206,12 @@ class _Partition(Actor):
         too_long, no_updates = False, False
         if (max_dur := self.max_dur) is not None:
             if too_long := ((timeit.default_timer() - self._start) >= max_dur):
-                self._stop_condition = (StopCondition.MAX_DURATION, max_dur)
+                self._stop_condition = StopCondition.MAX_DURATION.data(max_dur)
         elif (early_stop := self.early_stop) is not None:
             if no_updates := (self._since_update >= early_stop):
-                self._stop_condition = (StopCondition.EARLY_STOP, early_stop)
+                self._stop_condition = StopCondition.EARLY_STOP.data(early_stop)
         elif self._timed_out:
-            self._stop_condition = (StopCondition.TIMED_OUT, self.timeout)
+            self._stop_condition = StopCondition.TIMED_OUT.data(self.timeout)
         return self._timed_out or too_long or no_updates
 
     def receive(self) -> Optional[np.void]:
@@ -303,7 +307,7 @@ class _Partition(Actor):
 
     def _log(self, runtime: float) -> WorkerLog:
         def safe_stat(func, values):
-            return 0 if len(values) == 0 else approx(func(values))
+            return 0 if len(values) == 0 else float(func(values))
 
         nodes, (condition, data) = self._nodes, self._stop_condition
         props = nodes.values()
@@ -313,10 +317,10 @@ class _Partition(Actor):
         updates = updates[updates != 0]
         return WorkerLog(
             name=self.name,
-            runtime=approx(runtime),
+            runtime=runtime,
             messages=self._msgs,
             nodes=len(nodes),
-            node_data=approx(util.get_mb(nodes)),
+            node_data=util.get_mb(nodes),
             updates=len(updates),
             stop_condition=condition,
             stop_data=data,
@@ -391,7 +395,7 @@ class RiskPropagation(ActorSystem):
 
     def run(self, scores: NpSeq, contacts: Array) -> Array:
         assert len(scores) > 0 and len(contacts) > 0
-        ray.init(local_mode=True)
+        ray.init()
         result = self._run(scores, contacts)
         ray.shutdown()
         return result
@@ -409,6 +413,11 @@ class RiskPropagation(ActorSystem):
             scores: NpSeq,
             contacts: Array
     ) -> Tuple[Graph, Sequence[NpMap], Index]:
+        """Creates the graph.
+
+        Returns:
+            (graph, partition scores, node-to-partition index)
+        """
         self._index(scores, contacts)
         graph, adj, n2i = self._add_factors(contacts)
         n2p = self._add_vars(graph, adj, n2i)
@@ -453,7 +462,7 @@ class RiskPropagation(ActorSystem):
 
     def _connect(self, graph: ObjectRef) -> None:
         create_part, workers = self._create_part, self.workers
-        parts = (create_part(p, graph) for p in range(workers))
+        parts = (create_part(w, graph) for w in range(workers))
         pairs = parts if workers == 1 else itertools.combinations(parts, 2)
         self.connect(*pairs, duplex=True)
 
@@ -484,14 +493,15 @@ class RiskPropagation(ActorSystem):
 
     def _log_stats(self, graph: Graph) -> None:
         if self.logger is not None:
+            approx = util.approx
             self._log.update({
                 'GraphSizeInMb': approx(util.get_mb(graph)),
-                'Nodes': self.nodes,
-                'Edges': self.edges,
-                'TimeBufferInMinutes': self.time_buffer,
+                'Nodes': int(self.nodes),
+                'Edges': int(self.edges),
+                'TimeBufferInMinutes': float(self.time_buffer),
                 'Transmission': approx(self.transmission),
                 'SendTolerance': approx(self.tol),
-                'Workers': self.workers,
+                'Workers': int(self.workers),
                 'TimeoutInSeconds': approx(self.timeout),
                 'MaxDurationInSeconds': approx(self.max_dur),
                 'EarlyStop': self.early_stop})

@@ -156,8 +156,8 @@ def cs_main():
 
 def rp_main():
     logger = logging.getLogger()
-    dataset = synthetic.create_data(3000, low=-2, high=2, save=False)
-    cs = new_contact_search()
+    dataset = synthetic.create_data(1000, save=False)
+    cs = new_contact_search(logger)
     contacts = cs.search(dataset.geohashes())
     for w in range(1, 5):
         rp = propagation.RiskPropagation(

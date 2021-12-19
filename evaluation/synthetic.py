@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import warnings
 from datetime import datetime
 from logging import config
@@ -49,7 +50,7 @@ def create_locs(n: int, days: int, per_day: int, dist, **kwargs):
     steps = num_points(days, per_day)
     locs = np.zeros((n, 2, steps))
     for i in range(n):
-        xinit, yinit = dist.rvs(size=2)
+        xinit, yinit = dist(2)
         locs[i, ::] = walk(steps, xinit=xinit, yinit=yinit, **kwargs)
     return locs
 
@@ -120,6 +121,21 @@ class Dataset:
         return to_geohashes(self.histories, prec)
 
 
+class GaussianMixture:
+    __slots__ = ('locs', 'scales', 'weights', 'components')
+
+    def __init__(self, locs, scales, weights):
+        self.locs = locs
+        self.scales = scales
+        self.weights = weights
+        self.components = [
+            stats.norm(loc, scale) for loc, scale in zip(locs, scales)]
+
+    def __call__(self, n):
+        component = random.choices(self.components, weights=self.weights)[0]
+        return component.rvs(size=n)
+
+
 def create_data(
         users: int = 10_000,
         days: int = 14,
@@ -133,13 +149,14 @@ def create_data(
     times = create_times(users, datetime.now(), days, per_day)
     loc = abs(high) - abs(low)
     scale = np.sqrt((high - low) / 2)
+    dist = GaussianMixture([-3, 3], [0.1, 0.1], [0.5, 0.5])
     locs = create_locs(
         users,
         days=days,
         per_day=per_day,
-        dist=stats.norm(loc, scale),
-        low=low,
-        high=high,
+        dist=dist,
+        low=-5,
+        high=5,
         step_low=step_low,
         step_high=step_high)
     values = create_values(users, per_user=days + 1, p=p)
