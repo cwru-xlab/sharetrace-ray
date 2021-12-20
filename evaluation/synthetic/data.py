@@ -1,21 +1,18 @@
 from __future__ import annotations
 
-import logging
-import math
+import logging.config
 import os
 import random
 import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import lru_cache
-from logging import config
-from typing import Iterable, Optional, Tuple, Union
+from typing import Optional, Tuple
 
-import igraph as ig
-import networkx as nx
 import numpy as np
 from scipy import stats
 
+from evaluation.synthetic.graphs import ConnectedCavemanGraphFactory
 from sharetrace import model, util
 from sharetrace.model import ArrayLike
 from sharetrace.util import DateTime
@@ -41,12 +38,7 @@ def save_data(file, arr: np.ndarray):
 
 
 def load(filename):
-    try:
-        data = np.load(filename, allow_pickle=True)
-    except IOError as e:
-        print(e)
-        data = None
-    return data
+    return np.load(filename, allow_pickle=True)
 
 
 class DataFactory(ABC):
@@ -287,79 +279,6 @@ class Dataset:
         return os.path.join(path, 'contacts.npy')
 
 
-class Graph(ABC):
-    __slots__ = ()
-
-    def __init__(self):
-        super().__init__()
-
-    @property
-    @abstractmethod
-    def num_nodes(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def num_edges(self) -> int:
-        pass
-
-    @abstractmethod
-    def nodes(self) -> Iterable[int]:
-        pass
-
-    @abstractmethod
-    def edges(self) -> Iterable[Tuple[int, int]]:
-        pass
-
-
-class IGraph(Graph):
-    __slots__ = ('graph',)
-
-    def __init__(self, graph: Union[ig.Graph, nx.Graph]):
-        super().__init__()
-        if isinstance(graph, nx.Graph):
-            graph = ig.Graph.from_networkx(graph)
-        self.graph = graph
-
-    @property
-    def num_nodes(self) -> int:
-        return len(self.graph.vs)
-
-    @property
-    def num_edges(self) -> int:
-        return len(self.graph.es)
-
-    def nodes(self) -> Iterable[int]:
-        return iter(self.graph.vs.indices)
-
-    def edges(self) -> Iterable[Tuple[int, int]]:
-        return (e.tuple for e in self.graph.es)
-
-
-class GraphFactory(DataFactory):
-    __slots__ = ()
-
-    def __init__(self):
-        super().__init__()
-
-    @abstractmethod
-    def __call__(self, n: int) -> Graph:
-        pass
-
-
-class ConnectedCavemanGraphFactory(GraphFactory):
-    __slots__ = ('cliques',)
-
-    def __init__(self, cliques: int):
-        super().__init__()
-        self.cliques = cliques
-
-    def __call__(self, n: int) -> Graph:
-        clique = math.floor(n / self.cliques)
-        graph = nx.generators.connected_caveman_graph(self.cliques, clique)
-        return IGraph(graph)
-
-
 class DatasetFactory(DataFactory):
     __slots__ = ('score_factory', 'history_factory', 'contact_factory')
 
@@ -411,8 +330,8 @@ class HistoryFactory(DataFactory):
         locations, times = self.loc_factory(n), self.time_factory(n)
         tloc, history = model.temporal_loc, model.history
         return np.array([
-            history([tloc(loc, t) for t, loc in zip(ts, locs.T)], u)
-            for u, (ts, locs) in enumerate(zip(times, locations))])
+            history([tloc(loc, t) for t, loc in zip(ts, locs.T)], name)
+            for name, (ts, locs) in enumerate(zip(times, locations))])
 
 
 class ContactFactory(DataFactory):
@@ -428,7 +347,6 @@ class ContactFactory(DataFactory):
         times = self.time_factory(graph.num_edges)
         contact = model.contact
         edges = graph.edges()
-        # Shuffle each row to get a random time for each edge.
         return np.array([contact(names, t) for names, t in zip(edges, times)])
 
 

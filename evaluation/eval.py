@@ -5,8 +5,7 @@ import logging
 from logging import config
 
 import tqdm
-
-import synthetic
+from evaluation import synthetic
 from sharetrace import propagation, search, util
 from sharetrace.propagation import Array, NpSeq
 
@@ -106,7 +105,7 @@ def risk_prop(
         wstop: int,
         wstep: int):
     logger = logging.getLogger(f'risk-propagation:{impl}')
-    scores = synthetic.Dataset.load('.\\data').scores
+    scores = synthetic.data.load('.\\data').scores
     loop = list(itertools.product(
         range(ustart, ustop, ustep),
         range(wstart, wstop, wstep)))
@@ -122,7 +121,7 @@ def risk_prop(
 
 
 def exp5():
-    scores = synthetic.Dataset.load('.\\data').scores
+    scores = synthetic.data.load('.\\data').scores
     contacts = synthetic.load_contacts(10_000)
     logger = get_logger('risk-propagation:tolerance')
     for t in tqdm.tqdm(range(1, 11, 1)):
