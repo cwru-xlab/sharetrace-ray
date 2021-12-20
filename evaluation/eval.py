@@ -89,7 +89,7 @@ def contact_search(start: int, stop: int, step: int) -> None:
     data = synthetic.create_data(stop - step, low=-2, high=2)
     scores, hists = data.scores, data.geohashes()
     data.save(prec=8)
-    cs = new_contact_search(get_logger('contact-search'))
+    cs = new_contact_search(logging.getLogger('contact-search'))
     for n in tqdm.tqdm(range(start, stop, step)):
         contacts = cs.search(hists[:n])
         synthetic.save_contacts(contacts, n)
@@ -123,7 +123,7 @@ def risk_prop(
 def exp5():
     scores = synthetic.data.load('.\\data').scores
     contacts = synthetic.load_contacts(10_000)
-    logger = get_logger('risk-propagation:tolerance')
+    logger = logging.getLogger('risk-propagation:tolerance')
     for t in tqdm.tqdm(range(1, 11, 1)):
         rp = propagation.RiskPropagation(
             tol=round(t / 10, 1), timeout=3, logger=logger)
@@ -134,33 +134,7 @@ def new_contact_search(logger=None):
     return search.ContactSearch(min_dur=15, tol=200, workers=-1, logger=logger)
 
 
-def get_logger(name: str):
-    return logging.getLogger(name)
-
-
 def main(e=None):
     if e is None:
         e = parse().experiment
     eval(f'exp{e}()')
-
-
-def cs_main():
-    dataset = synthetic.create_data(5000, low=-2, high=2, save=False)
-    cs = new_contact_search(logging.getLogger())
-    contacts = cs.search(dataset.geohashes())
-
-
-def rp_main():
-    logger = logging.getLogger()
-    dataset = synthetic.create_data(500, low=-5, high=5, save=False)
-    # cs = new_contact_search(logger)
-    # contacts = cs.search(dataset.geohashes())
-    contacts = dataset.contacts
-    for w in range(1, 5):
-        rp = propagation.RiskPropagation(
-            logger=logger, workers=w, timeout=3, tol=0.3)
-        rp.run(dataset.scores, contacts)
-
-
-if __name__ == '__main__':
-    rp_main()
