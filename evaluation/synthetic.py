@@ -242,14 +242,12 @@ class Dataset:
         if self.histories is None:
             raise AttributeError("'histories' is None")
         else:
-            # noinspection PyArgumentList
             return model.to_geohashes(*self.histories, prec=prec)
 
     def save(self, path: str = '.') -> None:
         self._mkdir(path)
         save_data(self._scores_file(path), self.scores)
         if self.histories is not None:
-            # noinspection PyTypeChecker
             save_data(self._histories_file(path), self.histories)
         if self.contacts is not None:
             save_data(self._contacts_file(path), self.contacts)
@@ -265,16 +263,16 @@ class Dataset:
     def load(
             cls,
             path: str = '.',
-            with_histories: bool = False,
-            with_contacts: bool = False
+            histories: bool = False,
+            contacts: bool = False
     ) -> Dataset:
         scores = load(Dataset._scores_file(path))
-        histories, contacts = None, None
-        if with_histories:
-            histories = load(Dataset._histories_file(path))
-        if with_contacts:
-            contacts = load(Dataset._contacts_file(path))
-        return Dataset(scores, histories, contacts)
+        histories_, contacts_ = None, None
+        if histories:
+            histories_ = load(Dataset._histories_file(path))
+        if contacts:
+            contacts_ = load(Dataset._contacts_file(path))
+        return Dataset(scores, histories_, contacts_)
 
     @staticmethod
     def _scores_file(path: str) -> str:
@@ -306,36 +304,36 @@ class Graph(ABC):
         pass
 
     @abstractmethod
-    def nodes(self) -> Iterable:
+    def nodes(self) -> Iterable[int]:
         pass
 
     @abstractmethod
-    def edges(self) -> Iterable:
+    def edges(self) -> Iterable[Tuple[int, int]]:
         pass
 
 
 class IGraph(Graph):
-    __slots__ = ('_graph',)
+    __slots__ = ('graph',)
 
     def __init__(self, graph: Union[ig.Graph, nx.Graph]):
         super().__init__()
         if isinstance(graph, nx.Graph):
             graph = ig.Graph.from_networkx(graph)
-        self._graph = graph
+        self.graph = graph
 
     @property
     def num_nodes(self) -> int:
-        return len(self._graph.vs)
+        return len(self.graph.vs)
 
     @property
     def num_edges(self) -> int:
-        return len(self._graph.es)
+        return len(self.graph.es)
 
     def nodes(self) -> Iterable[int]:
-        return iter(self._graph.vs.indices)
+        return iter(self.graph.vs.indices)
 
     def edges(self) -> Iterable[Tuple[int, int]]:
-        return (e.tuple for e in self._graph.es)
+        return (e.tuple for e in self.graph.es)
 
 
 class GraphFactory(DataFactory):
@@ -395,12 +393,10 @@ class ScoreFactory(DataFactory):
 
     def __call__(self, n: int) -> np.ndarray:
         values, times = self.value_factory(n), self.time_factory(n)
-        assert times.shape[0] == n
-        scores = []
-        risk_score, append = model.risk_score, scores.append
-        for vs, ts in zip(values, times):
-            append([risk_score(v, t) for v, t in zip(vs, ts)])
-        return np.array(scores)
+        risk_score = model.risk_score
+        return np.array([
+            [risk_score(v, t) for v, t in zip(vs, ts)]
+            for vs, ts in zip(values, times)])
 
 
 class HistoryFactory(DataFactory):
@@ -413,13 +409,10 @@ class HistoryFactory(DataFactory):
 
     def __call__(self, n: int) -> np.ndarray:
         locations, times = self.loc_factory(n), self.time_factory(n)
-        histories = []
-        append = histories.append
         tloc, history = model.temporal_loc, model.history
-        for u, (ts, locs) in enumerate(zip(times, locations)):
-            tlocs = [tloc(loc, t) for t, loc in zip(ts, locs.T)]
-            append(history(tlocs, u))
-        return np.array(histories)
+        return np.array([
+            history([tloc(loc, t) for t, loc in zip(ts, locs.T)], u)
+            for u, (ts, locs) in enumerate(zip(times, locations))])
 
 
 class ContactFactory(DataFactory):
@@ -432,8 +425,7 @@ class ContactFactory(DataFactory):
 
     def __call__(self, n: int) -> np.ndarray:
         graph = self.graph_factory(n)
-        times = self.time_factory(edges := graph.num_edges)
-        assert times.size == edges
+        times = self.time_factory(graph.num_edges)
         contact = model.contact
         edges = graph.edges()
         # Shuffle each row to get a random time for each edge.
