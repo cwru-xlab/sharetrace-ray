@@ -278,3 +278,4 @@ def create_data(
     dataset = dataset_factory(users)
     if save:
         dataset.save('.//data')
+    return dataset

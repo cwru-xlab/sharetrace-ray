@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import timeit
+import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
@@ -12,7 +13,6 @@ from typing import (
 )
 
 import numpy as np
-import pymetis
 import ray
 from ray import ObjectRef
 
@@ -344,6 +344,7 @@ class RiskPropagation(ActorSystem):
         'timeout',
         'max_dur',
         'early_stop',
+        'partitioning',
         'logger',
         'nodes',
         'edges',
@@ -361,6 +362,7 @@ class RiskPropagation(ActorSystem):
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None,
+            partitioning: str = 'spectral',
             logger: Optional[logging.Logger] = None):
         super().__init__(ACTOR_SYSTEM)
         assert isinstance(time_buffer, int) and time_buffer > 0
@@ -373,6 +375,7 @@ class RiskPropagation(ActorSystem):
             assert isinstance(max_dur, Real) and max_dur > 0
         if early_stop is not None:
             assert isinstance(early_stop, int) and early_stop > 0
+        assert partitioning in ('metis', 'spectral')
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
@@ -381,6 +384,7 @@ class RiskPropagation(ActorSystem):
         self.timeout = timeout
         self.max_dur = max_dur
         self.early_stop = early_stop
+        self.partitioning = partitioning
         self.logger = logger
         self.nodes: int = -1
         self.edges: int = -1
@@ -419,8 +423,8 @@ class RiskPropagation(ActorSystem):
             (graph, partition scores, node-to-partition index)
         """
         self._index(scores, contacts)
-        graph, adj, n2i = self._add_factors(contacts)
-        n2p = self._add_vars(graph, adj, n2i)
+        graph, adjlist, n2i = self._add_factors(contacts)
+        n2p = self._add_vars(graph, adjlist, n2i)
         self._connect(ray.put(graph))
         parts = self._group(scores, n2i, n2p)
         self._log_stats(graph)
@@ -446,19 +450,45 @@ class RiskPropagation(ActorSystem):
             adj[i2].append(i1)
             graph[ckey(i1, i2)] = contact['time']
         n2i = np.array(list(adj))
-        adj = [np.array(ne) for ne in adj.values()]
+        adjlist = [np.array(ne) for ne in adj.values()]
         self.nodes, self.edges = len(adj), len(graph)
-        return graph, adj, n2i
+        return graph, adjlist, n2i
 
-    def _add_vars(self, graph: Graph, adj: Sequence, n2i: Index) -> Index:
-        n2p = self.partition(adj)
+    def _add_vars(self, graph: Graph, adjlist: Sequence, n2i: Index) -> Index:
+        n2p = self.partition(adjlist, n2i)
         node = model.node
-        graph.update((n2i[n], node(ne, n2p[n])) for n, ne in enumerate(adj))
+        graph.update((n2i[n], node(ne, n2p[n])) for n, ne in enumerate(adjlist))
         return n2p
 
-    def partition(self, adj: Sequence) -> Array:
-        _, labels = pymetis.part_graph(self.workers, adj)
+    def partition(self, adjlist: Sequence, n2i: Index) -> Array:
+        if self.partitioning == 'spectral':
+            labels = self._spectral_partition(adjlist, n2i)
+        else:
+            labels = self._metis_partition(adjlist)
         return labels
+
+    def _metis_partition(self, adjlist: Sequence) -> Array:
+        import pymetis
+        _, labels = pymetis.part_graph(self.workers, adjlist)
+        return labels
+
+    def _spectral_partition(self, adjlist: Sequence, n2i: Index) -> Array:
+        from sklearn import cluster
+        # Ignore warning regarding disconnected graph.
+        warnings.filterwarnings('ignore')
+        spectral = cluster.SpectralClustering(
+            self.workers,
+            n_init=100,
+            affinity='precomputed',
+            assign_labels='discretize')
+        return spectral.fit_predict(self._adjmat(adjlist, n2i))
+
+    def _adjmat(self, adjlist: Sequence, n2i: Index):
+        from scipy import sparse
+        adjmat = sparse.dok_matrix((self.nodes, self.nodes), dtype=np.int8)
+        for n, ne in enumerate(adjlist):
+            adjmat[n2i[n], ne] = 1
+        return adjmat.tocsr()
 
     def _connect(self, graph: ObjectRef) -> None:
         create_part, workers = self._create_part, self.workers
