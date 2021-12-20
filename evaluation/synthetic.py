@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import logging
+import math
 import os
 import random
 import warnings
@@ -6,12 +9,15 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import lru_cache
 from logging import config
-from typing import Optional
+from typing import Iterable, Optional, Tuple, Union
 
+import igraph as ig
+import networkx as nx
 import numpy as np
 from scipy import stats
 
 from sharetrace import model, util
+from sharetrace.model import ArrayLike
 from sharetrace.util import DateTime
 
 logging.config.dictConfig(util.logging_config())
@@ -35,7 +41,12 @@ def save_data(file, arr: np.ndarray):
 
 
 def load(filename):
-    return np.load(filename, allow_pickle=True)
+    try:
+        data = np.load(filename, allow_pickle=True)
+    except IOError as e:
+        print(e)
+        data = None
+    return data
 
 
 class DataFactory(ABC):
@@ -45,7 +56,7 @@ class DataFactory(ABC):
         super().__init__()
 
     @abstractmethod
-    def __call__(self, users: int):
+    def __call__(self, n: int):
         pass
 
 
@@ -59,48 +70,53 @@ class UniformBernoulliValueFactory(DataFactory):
         self.per_user = per_user
         self.p = p
 
-    def __call__(self, users: int):
+    def __call__(self, n: int):
         per_user = self.per_user
-        indicator = stats.bernoulli.rvs(self.p, size=users)
+        indicator = stats.bernoulli.rvs(self.p, size=n)
         replace = np.flatnonzero(indicator)
-        values = rng.uniform(0, 0.5, size=(users, per_user))
+        values = rng.uniform(0, 0.5, size=(n, per_user))
         values[replace] = rng.uniform(0.5, 1, size=(len(replace), per_user))
         return values
 
 
 class TimeFactory(DataFactory):
-    __slots__ = ('days', 'per_day', 'now')
+    __slots__ = ('days', 'per_day', 'now', 'random_first')
 
     def __init__(
             self,
             days: int = 15,
             per_day: int = 16,
-            now: Optional[DateTime] = None):
+            now: Optional[DateTime] = None,
+            random_first: bool = False):
         assert days > 0
         assert per_day > 0
         super().__init__()
         self.days = days
         self.per_day = per_day
         self.now = now or datetime.utcnow()
+        self.random_first = random_first
 
-    def __call__(self, users: int):
+    def __call__(self, n: int) -> np.ndarray:
         create_delta, concat = self.create_delta, np.concatenate
         dt_type, td_type = 'datetime64[s]', 'timedelta64[s]'
         now = np.datetime64(self.now).astype(dt_type)
         offsets = (np.arange(self.days) * SEC_PER_DAY).astype(td_type)
         starts = now - offsets
-        times = np.zeros((users, self.days * self.per_day), dtype=dt_type)
-        for i in range(users):
+        times = np.zeros((n, self.days * self.per_day), dtype=dt_type)
+        for i in range(n):
             delta = create_delta().astype(td_type)
             times[i, :] = concat([start + delta for start in starts])
+        if self.random_first:
+            rng.shuffle(times, axis=1)
+            times = times[:, 0]
         return times
 
-    def create_delta(self):
+    def create_delta(self) -> np.ndarray:
         deltas = rng.uniform(0, SEC_PER_DAY / self.per_day, size=self.per_day)
         return deltas.cumsum()
 
 
-class RandomWalkLocationFactory(DataFactory):
+class LocationFactory(DataFactory):
     __slots__ = (
         'days',
         'per_day',
@@ -129,17 +145,17 @@ class RandomWalkLocationFactory(DataFactory):
         self.step_low = step_low
         self.step_high = step_high
 
-    def __call__(self, users: int):
-        locs = np.zeros((users, 2, self.steps()))
+    def __call__(self, n: int) -> np.ndarray:
+        locs = np.zeros((n, 2, self.steps()))
         walk = self.walk
-        for i in range(users):
+        for i in range(n):
             locs[i, ::] = walk()
         return locs
 
-    def steps(self):
+    def steps(self) -> int:
         return self.days * self.per_day
 
-    def walk(self):
+    def walk(self) -> np.ndarray:
         clip = np.clip
         low, high = self.low, self.high
         (x0, y0), steps, delta = self.x0y0(), self.steps(), self.delta()
@@ -149,98 +165,20 @@ class RandomWalkLocationFactory(DataFactory):
             xy[:, i] = clip(xy[:, i - 1] + delta[:, i], low, high)
         return xy
 
-    def x0y0(self):
+    def x0y0(self) -> Tuple[float, float]:
         loc = abs(self.high) - abs(self.low)
         scale = np.sqrt((self.high - self.low) / 2)
         return stats.norm(loc, scale).rvs(size=2)
 
-    def delta(self):
+    def delta(self) -> np.ndarray:
         steps = self.steps()
         return rng.uniform(self.step_low, self.step_high, size=(2, steps))
-
-
-class Dataset:
-    __slots__ = ('scores', 'histories')
-
-    def __init__(self, scores, histories):
-        self.scores = scores
-        self.histories = histories
-
-    @lru_cache
-    def geohashes(self, prec: int = 8):
-        return model.to_geohashes(*self.histories, prec=prec)
-
-    def save(self, path: str = '.'):
-        self._mkdir(path)
-        save_data(self._scores_file(path), self.scores)
-        save_data(self._histories_file(path), self.histories)
-
-    @staticmethod
-    def _mkdir(path: str):
-        try:
-            os.mkdir(path)
-        except FileExistsError:
-            pass
-
-    @classmethod
-    def load(cls, path: str = '.'):
-        scores = load(Dataset._scores_file(path))
-        histories = load(Dataset._histories_file(path))
-        return Dataset(scores, histories)
-
-    @staticmethod
-    def _scores_file(path: str):
-        return os.path.join(path, 'scores.npy')
-
-    @staticmethod
-    def _histories_file(path: str):
-        return os.path.join(path, 'histories.npy')
-
-
-class DatasetFactory(DataFactory):
-    __slots__ = ('value_factory', 'time_factory', 'loc_factory')
-
-    def __init__(
-            self,
-            value_factory: DataFactory,
-            time_factory: DataFactory,
-            loc_factory: DataFactory):
-        super().__init__()
-        self.value_factory = value_factory
-        self.time_factory = time_factory
-        self.loc_factory = loc_factory
-
-    def __call__(self, users: int) -> Dataset:
-        values = self.value_factory(users)
-        times = self.time_factory(users)
-        locs = self.loc_factory(users)
-        scores = self.scores(values, times)
-        histories = self.histories(locs, times)
-        return Dataset(scores, histories)
-
-    @staticmethod
-    def scores(values, times):
-        scores = []
-        risk_score, append = model.risk_score, scores.append
-        for uvals, utimes in zip(values, times):
-            append([risk_score(v, t) for v, t in zip(uvals, utimes)])
-        return np.array(scores)
-
-    @staticmethod
-    def histories(locs, times):
-        histories = []
-        append = histories.append
-        tloc, history = model.temporal_loc, model.history
-        for u, (utimes, ulocs) in enumerate(zip(times, locs)):
-            tlocs = [tloc(loc, time) for time, loc in zip(utimes, ulocs.T)]
-            append(history(tlocs, u))
-        return np.array(histories)
 
 
 class GaussianMixture:
     __slots__ = ('locs', 'scales', 'weights', 'components')
 
-    def __init__(self, locs, scales, weights):
+    def __init__(self, locs: ArrayLike, scales: ArrayLike, weights: ArrayLike):
         self.locs = locs
         self.scales = scales
         self.weights = weights
@@ -252,6 +190,256 @@ class GaussianMixture:
         return component.rvs(size=n)
 
 
+class GaussianMixtureLocationFactory(LocationFactory):
+    __slots__ = ('components', 'locs', 'scales', 'weights', '_mixture')
+
+    def __init__(
+            self,
+            components=None,
+            locs=None,
+            scales=None,
+            weights=None,
+            **kwargs):
+        super(GaussianMixtureLocationFactory, self).__init__(**kwargs)
+        if components is None:
+            if locs is None:
+                if scales is None:
+                    if weights is None:
+                        raise ValueError(
+                            "Must specify 'components' or at least one of "
+                            "'locs', 'scales', or 'weights'")
+                    else:
+                        # noinspection PyTypeChecker
+                        components = len(weights)
+                else:
+                    components = len(scales)
+            else:
+                components = len(locs)
+        self.components = c = components
+        self.locs = locs or np.linspace(self.low, self.high, 2 + c)[1:-1]
+        self.scales = scales or np.repeat(np.sqrt(np.diff(self.locs[:2])), c)
+        self.weights = weights or np.repeat(1 / c, c)
+        self._mixture = GaussianMixture(self.locs, self.scales, self.weights)
+
+    def x0y0(self) -> Tuple[float, float]:
+        return self._mixture(2)
+
+
+class Dataset:
+    __slots__ = ('scores', 'histories', 'contacts')
+
+    def __init__(
+            self,
+            scores: ArrayLike,
+            histories: Optional[ArrayLike] = None,
+            contacts: Optional[ArrayLike] = None):
+        self.scores = scores
+        self.histories = histories
+        self.contacts = contacts
+
+    @lru_cache
+    def geohashes(self, prec: int = 8) -> ArrayLike:
+        if self.histories is None:
+            raise AttributeError("'histories' is None")
+        else:
+            # noinspection PyArgumentList
+            return model.to_geohashes(*self.histories, prec=prec)
+
+    def save(self, path: str = '.') -> None:
+        self._mkdir(path)
+        save_data(self._scores_file(path), self.scores)
+        if self.histories is not None:
+            # noinspection PyTypeChecker
+            save_data(self._histories_file(path), self.histories)
+        if self.contacts is not None:
+            save_data(self._contacts_file(path), self.contacts)
+
+    @staticmethod
+    def _mkdir(path: str) -> None:
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            pass
+
+    @classmethod
+    def load(
+            cls,
+            path: str = '.',
+            with_histories: bool = False,
+            with_contacts: bool = False
+    ) -> Dataset:
+        scores = load(Dataset._scores_file(path))
+        histories, contacts = None, None
+        if with_histories:
+            histories = load(Dataset._histories_file(path))
+        if with_contacts:
+            contacts = load(Dataset._contacts_file(path))
+        return Dataset(scores, histories, contacts)
+
+    @staticmethod
+    def _scores_file(path: str) -> str:
+        return os.path.join(path, 'scores.npy')
+
+    @staticmethod
+    def _histories_file(path: str) -> str:
+        return os.path.join(path, 'histories.npy')
+
+    @staticmethod
+    def _contacts_file(path: str) -> str:
+        return os.path.join(path, 'contacts.npy')
+
+
+class Graph(ABC):
+    __slots__ = ()
+
+    def __init__(self):
+        super().__init__()
+
+    @property
+    @abstractmethod
+    def num_nodes(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
+    def num_edges(self) -> int:
+        pass
+
+    @abstractmethod
+    def nodes(self) -> Iterable:
+        pass
+
+    @abstractmethod
+    def edges(self) -> Iterable:
+        pass
+
+
+class IGraph(Graph):
+    __slots__ = ('_graph',)
+
+    def __init__(self, graph: Union[ig.Graph, nx.Graph]):
+        super().__init__()
+        if isinstance(graph, nx.Graph):
+            graph = ig.Graph.from_networkx(graph)
+        self._graph = graph
+
+    @property
+    def num_nodes(self) -> int:
+        return len(self._graph.vs)
+
+    @property
+    def num_edges(self) -> int:
+        return len(self._graph.es)
+
+    def nodes(self) -> Iterable[int]:
+        return iter(self._graph.vs.indices)
+
+    def edges(self) -> Iterable[Tuple[int, int]]:
+        return (e.tuple for e in self._graph.es)
+
+
+class GraphFactory(DataFactory):
+    __slots__ = ()
+
+    def __init__(self):
+        super().__init__()
+
+    @abstractmethod
+    def __call__(self, n: int) -> Graph:
+        pass
+
+
+class ConnectedCavemanGraphFactory(GraphFactory):
+    __slots__ = ('cliques',)
+
+    def __init__(self, cliques: int):
+        super().__init__()
+        self.cliques = cliques
+
+    def __call__(self, n: int) -> Graph:
+        clique = math.floor(n / self.cliques)
+        graph = nx.generators.connected_caveman_graph(self.cliques, clique)
+        return IGraph(graph)
+
+
+class DatasetFactory(DataFactory):
+    __slots__ = ('score_factory', 'history_factory', 'contact_factory')
+
+    def __init__(
+            self,
+            score_factory: ScoreFactory,
+            history_factory: Optional[HistoryFactory] = None,
+            contact_factory: Optional[ContactFactory] = None):
+        super().__init__()
+        self.score_factory = score_factory
+        self.history_factory = history_factory
+        self.contact_factory = contact_factory
+
+    def __call__(self, n: int) -> Dataset:
+        scores = self.score_factory(n)
+        histories, contacts = None, None
+        if (factory := self.history_factory) is not None:
+            histories = factory(n)
+        if (factory := self.contact_factory) is not None:
+            contacts = factory(n)
+        return Dataset(scores, histories, contacts)
+
+
+class ScoreFactory(DataFactory):
+    __slots__ = ('value_factory', 'time_factory')
+
+    def __init__(self, value_factory: DataFactory, time_factory: DataFactory):
+        super().__init__()
+        self.value_factory = value_factory
+        self.time_factory = time_factory
+
+    def __call__(self, n: int) -> np.ndarray:
+        values, times = self.value_factory(n), self.time_factory(n)
+        assert times.shape[0] == n
+        scores = []
+        risk_score, append = model.risk_score, scores.append
+        for vs, ts in zip(values, times):
+            append([risk_score(v, t) for v, t in zip(vs, ts)])
+        return np.array(scores)
+
+
+class HistoryFactory(DataFactory):
+    __slots__ = ('loc_factory', 'time_factory')
+
+    def __init__(self, loc_factory: DataFactory, time_factory: DataFactory):
+        super().__init__()
+        self.loc_factory = loc_factory
+        self.time_factory = time_factory
+
+    def __call__(self, n: int) -> np.ndarray:
+        locations, times = self.loc_factory(n), self.time_factory(n)
+        histories = []
+        append = histories.append
+        tloc, history = model.temporal_loc, model.history
+        for u, (ts, locs) in enumerate(zip(times, locations)):
+            tlocs = [tloc(loc, t) for t, loc in zip(ts, locs.T)]
+            append(history(tlocs, u))
+        return np.array(histories)
+
+
+class ContactFactory(DataFactory):
+    __slots__ = ('graph_factory', 'time_factory')
+
+    def __init__(self, graph_factory: DataFactory, time_factory: DataFactory):
+        super().__init__()
+        self.graph_factory = graph_factory
+        self.time_factory = time_factory
+
+    def __call__(self, n: int) -> np.ndarray:
+        graph = self.graph_factory(n)
+        times = self.time_factory(edges := graph.num_edges)
+        assert times.size == edges
+        contact = model.contact
+        edges = graph.edges()
+        # Shuffle each row to get a random time for each edge.
+        return np.array([contact(names, t) for names, t in zip(edges, times)])
+
+
 def create_data(
         users: int = 10_000,
         days: int = 15,
@@ -261,20 +449,23 @@ def create_data(
         step_low: float = -0.01,
         step_high: float = 0.01,
         p: float = 0.2,
-        save: bool = False):
-    time_factory = TimeFactory(days, per_day)
-    value_factory = UniformBernoulliValueFactory(days, p)
-    loc_factory = RandomWalkLocationFactory(
-        days=days,
-        per_day=per_day,
-        low=low,
-        high=high,
-        step_low=step_low,
-        step_high=step_high)
+        save: bool = False) -> Dataset:
     dataset_factory = DatasetFactory(
-        value_factory=value_factory,
-        time_factory=time_factory,
-        loc_factory=loc_factory)
+        score_factory=ScoreFactory(
+            value_factory=UniformBernoulliValueFactory(per_user=days, p=p),
+            time_factory=TimeFactory(days=days, per_day=1)),
+        history_factory=HistoryFactory(
+            loc_factory=LocationFactory(
+                days=days,
+                per_day=per_day,
+                low=low,
+                high=high,
+                step_low=step_low,
+                step_high=step_high),
+            time_factory=TimeFactory(days=days, per_day=per_day)),
+        contact_factory=ContactFactory(
+            graph_factory=ConnectedCavemanGraphFactory(2),
+            time_factory=TimeFactory(days=days, per_day=1, random_first=True)))
     dataset = dataset_factory(users)
     if save:
         dataset.save('.//data')

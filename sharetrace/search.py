@@ -111,10 +111,9 @@ class ContactSearch:
             durations = ints[:, 1] - ints[:, 0]
             if len(options := np.flatnonzero(durations >= self.min_dur)) > 0:
                 names = (hist1['name'], hist2['name'])
-                start, end = ints[options[-1]]
-                duration = np.timedelta64(end - start, 'm')
+                start, _ = ints[options[-1]]
                 time = datetime.datetime.utcfromtimestamp(times1[start] * 60)
-                contact = model.contact(names, time, duration)
+                contact = model.contact(names, time)
         return contact
 
     def proximal(self, locs1: Array, locs2: Array) -> Array:

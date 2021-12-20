@@ -83,24 +83,18 @@ def to_coord(geohash: Struct) -> Struct:
     return temporal_loc((lat, long), geohash['time'])
 
 
-def contact(names: ArrayLike, time: DateTime, dur: TimeDelta) -> Struct:
+def contact(names: ArrayLike, time: DateTime) -> Struct:
     """Creates a named event.
 
     Args:
         names: An array-like object, typically of length 2.
         time: A datetime datetime or numpy datetime64.
-        dur: A datetime timedelta or numpy timedelta64.
     Returns:
-        A structured array with attributes 'names', 'time', and 'dur'.
+        A structured array with attributes 'names' and 'time'.
     """
-    names = np.asarray(names)
-    time = np.datetime64(time)
-    dur = np.timedelta64(dur)
-    dt = [
-        ('names', names.dtype, names.shape),
-        ('time', time.dtype),
-        ('dur', dur.dtype)]
-    return np.array([(names, time, dur)], dtype=dt)[0]
+    names, time = np.asarray(names), np.datetime64(time)
+    dt = [('names', names.dtype, names.shape), ('time', time.dtype)]
+    return np.array([(names, time)], dtype=dt)[0]
 
 
 def history(locs: ArrayLike, name: int) -> Struct:

@@ -245,8 +245,6 @@ class _Partition(Actor):
             self._since_update += 1
 
     def on_start(self, scores: NpMap) -> None:
-        # Must be a mapping since indices may neither start at 0 nor be
-        # contiguous, based on the original input scores.
         nodes = {}
         transmission = self.transmission
         for var, vscores in scores.items():
@@ -274,8 +272,7 @@ class _Partition(Actor):
         for f in factors:
             # Only consider scores that may have been transmitted from contact.
             ctime = graph[ckey(var, f)]
-            scores = scores[scores['time'] <= ctime + buffer]
-            if len(scores) > 0:
+            if len(scores := scores[scores['time'] <= ctime + buffer]) > 0:
                 # Scales time deltas in partial days.
                 diff = np.clip((scores['time'] - ctime) / DAY, -np.inf, 0)
                 # Use the log transform to avoid overflow issues.
