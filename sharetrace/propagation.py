@@ -268,16 +268,16 @@ class _Partition(Actor):
         graph, init, sgroup, send, buffer, tol, const, transmission = (
             self.graph, self._nodes[var]['init_msg'], self.name, self.send,
             self.time_buffer, self.tol, self.time_const, self.transmission)
-        message = model.message
+        message, clip, log, argmax = model.message, np.clip, np.log, np.argmax
         for f in factors:
             # Only consider scores that may have been transmitted from contact.
             ctime = graph[ckey(var, f)]
             if len(scores := scores[scores['time'] <= ctime + buffer]) > 0:
                 # Scales time deltas in partial days.
-                diff = np.clip((scores['time'] - ctime) / DAY, -np.inf, 0)
+                diff = clip((scores['time'] - ctime) / DAY, -np.inf, 0)
                 # Use the log transform to avoid overflow issues.
-                weighted = np.log(scores['val']) + (diff / const)
-                score = scores[np.argmax(weighted)]
+                weighted = log(scores['val']) + (diff / const)
+                score = scores[argmax(weighted)]
                 score['val'] *= transmission
                 # This is a necessary, but not sufficient, condition for the
                 # value of a neighbor to be updated. The transmission rate
@@ -300,7 +300,7 @@ class _Partition(Actor):
         if (key := msg['dgroup']) == self.name:
             self._local.append(msg)
         else:
-            self.neighbors[key].put(msg, block=True, timeout=self.timeout)
+            self.neighbors[key].put_nowait(msg)
 
     def _log(self, runtime: float) -> WorkerLog:
         def safe_stat(func, values):
@@ -345,9 +345,9 @@ class RiskPropagation(ActorSystem):
         'logger',
         'nodes',
         'edges',
+        'log',
         '_u2i',
-        '_init',
-        '_log')
+        '_init')
 
     def __init__(
             self,
@@ -385,14 +385,14 @@ class RiskPropagation(ActorSystem):
         self.logger = logger
         self.nodes: int = -1
         self.edges: int = -1
+        self.log: Log = {}
         self._u2i: Index = {}
         self._init: Mapping[int, float] = {}
-        self._log: Log = {}
 
     def send(self, parts: Sequence[NpMap]) -> None:
         neighbors = self.neighbors
         for p, pscores in enumerate(parts):
-            neighbors[p].put(pscores, block=True)
+            neighbors[p].put_nowait(pscores)
 
     def run(self, scores: NpSeq, contacts: Array) -> Array:
         assert len(scores) > 0 and len(contacts) > 0
@@ -402,6 +402,7 @@ class RiskPropagation(ActorSystem):
         return result
 
     def _run(self, scores: NpSeq, contacts: Array) -> Array:
+        self.log.clear()
         _, parts, _ = self.create_graph(scores, contacts)
         self.send(parts)
         results = ray.get([a.run() for a in self.actors])
@@ -478,7 +479,8 @@ class RiskPropagation(ActorSystem):
             n_init=100,
             affinity='precomputed',
             assign_labels='discretize')
-        return spectral.fit_predict(self._adjmat(adjlist, n2i))
+        adjmat = self._adjmat(adjlist, n2i)
+        return spectral.fit_predict(adjmat)
 
     def _adjmat(self, adjlist: Sequence, n2i: Index):
         from scipy import sparse
@@ -519,19 +521,18 @@ class RiskPropagation(ActorSystem):
         return parts
 
     def _log_stats(self, graph: Graph) -> None:
-        if self.logger is not None:
-            approx = util.approx
-            self._log.update({
-                'GraphSizeInMb': approx(util.get_mb(graph)),
-                'Nodes': int(self.nodes),
-                'Edges': int(self.edges),
-                'TimeBufferInMinutes': float(self.time_buffer),
-                'Transmission': approx(self.transmission),
-                'SendTolerance': approx(self.tol),
-                'Workers': int(self.workers),
-                'TimeoutInSeconds': approx(self.timeout),
-                'MaxDurationInSeconds': approx(self.max_dur),
-                'EarlyStop': self.early_stop})
+        approx = util.approx
+        self.log.update({
+            'GraphSizeInMb': approx(util.get_mb(graph)),
+            'Nodes': int(self.nodes),
+            'Edges': int(self.edges),
+            'TimeBufferInMinutes': float(self.time_buffer),
+            'Transmission': approx(self.transmission),
+            'SendTolerance': approx(self.tol),
+            'Workers': int(self.workers),
+            'TimeoutInSeconds': approx(self.timeout),
+            'MaxDurationInSeconds': approx(self.max_dur),
+            'EarlyStop': self.early_stop})
 
     def _gather(self, results: Iterable[Result]) -> Array:
         merged = dict(self._init)
@@ -544,10 +545,9 @@ class RiskPropagation(ActorSystem):
 
     def _write_log(self) -> None:
         if (logger := self.logger) is not None:
-            logger.info(json.dumps(self._log))
+            logger.info(json.dumps(self.log))
 
     def _log_workers(self, results: Iterable[Result]) -> None:
-        if self.logger is not None:
-            logs = [r.log for r in results]
-            self._log.update(WorkerLog.summarize(*logs))
-            self._log['WorkerLogs'] = [log.format() for log in logs]
+        logs = [r.log for r in results]
+        self.log.update(WorkerLog.summarize(*logs))
+        self.log['WorkerLogs'] = [log.format() for log in logs]
