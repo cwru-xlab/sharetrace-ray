@@ -1,2 +1,2 @@
-from data import *
-from graphs import *
+from .data import *
+from .graphs import *

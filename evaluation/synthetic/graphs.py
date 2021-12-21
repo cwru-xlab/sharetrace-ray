@@ -36,27 +36,27 @@ class Graph(ABC):
 
 
 class IGraph(Graph):
-    __slots__ = ('graph',)
+    __slots__ = ('_graph',)
 
     def __init__(self, graph: Union[ig.Graph, nx.Graph]):
         super().__init__()
         if isinstance(graph, nx.Graph):
             graph = ig.Graph.from_networkx(graph)
-        self.graph = graph
+        self._graph = graph
 
     @property
     def num_nodes(self) -> int:
-        return len(self.graph.vs)
+        return len(self._graph.vs)
 
     @property
     def num_edges(self) -> int:
-        return len(self.graph.es)
+        return len(self._graph.es)
 
     def nodes(self) -> Iterable[int]:
-        return iter(self.graph.vs.indices)
+        return iter(self._graph.vs.indices)
 
     def edges(self) -> Iterable[Tuple[int, int]]:
-        return (e.tuple for e in self.graph.es)
+        return (e.tuple for e in self._graph.es)
 
 
 class GraphFactory(DataFactory):

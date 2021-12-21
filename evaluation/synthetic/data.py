@@ -12,7 +12,6 @@ from typing import Optional, Tuple
 import numpy as np
 from scipy import stats
 
-from evaluation.synthetic.graphs import ConnectedCavemanGraphFactory
 from sharetrace import model, util
 from sharetrace.model import ArrayLike
 from sharetrace.util import DateTime
@@ -348,35 +347,3 @@ class ContactFactory(DataFactory):
         contact = model.contact
         edges = graph.edges()
         return np.array([contact(names, t) for names, t in zip(edges, times)])
-
-
-def create_data(
-        users: int = 10_000,
-        days: int = 15,
-        per_day: int = 16,
-        low: float = -1,
-        high: float = 1,
-        step_low: float = -0.01,
-        step_high: float = 0.01,
-        p: float = 0.2,
-        save: bool = False) -> Dataset:
-    dataset_factory = DatasetFactory(
-        score_factory=ScoreFactory(
-            value_factory=UniformBernoulliValueFactory(per_user=days, p=p),
-            time_factory=TimeFactory(days=days, per_day=1)),
-        history_factory=HistoryFactory(
-            loc_factory=LocationFactory(
-                days=days,
-                per_day=per_day,
-                low=low,
-                high=high,
-                step_low=step_low,
-                step_high=step_high),
-            time_factory=TimeFactory(days=days, per_day=per_day)),
-        contact_factory=ContactFactory(
-            graph_factory=ConnectedCavemanGraphFactory(2),
-            time_factory=TimeFactory(days=days, per_day=1, random_first=True)))
-    dataset = dataset_factory(users)
-    if save:
-        dataset.save('.//data')
-    return dataset
