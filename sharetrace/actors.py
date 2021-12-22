@@ -57,8 +57,8 @@ class Actor:
     def __hash__(self) -> int:
         return hash(self.name)
 
-    def __eq__(self, other) -> bool:
-        return self is other or isinstance(other, Actor)
+    def __eq__(self, o: object) -> bool:
+        return self is o or (isinstance(o, Actor) and self.name == o.name)
 
 
 Actors = Union[Iterable, Actor]
