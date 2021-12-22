@@ -8,13 +8,17 @@ import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
-    Any, Hashable, Iterable, Mapping, MutableMapping, Optional, Sequence, Tuple,
+    Any, Hashable, Iterable, Mapping, MutableMapping, Optional, Sequence, Set,
+    Tuple,
     Type, Union
 )
 
 import numpy as np
+import pymetis
 import ray
 from ray import ObjectRef
+from scipy import sparse
+from sklearn import cluster
 
 from sharetrace import model, queue, util
 from sharetrace.actors import Actor, ActorSystem
@@ -345,9 +349,7 @@ class RiskPropagation(ActorSystem):
         'logger',
         'nodes',
         'edges',
-        'log',
-        '_u2i',
-        '_init')
+        'log')
 
     def __init__(
             self,
@@ -386,8 +388,6 @@ class RiskPropagation(ActorSystem):
         self.nodes: int = -1
         self.edges: int = -1
         self.log: Log = {}
-        self._u2i: Index = {}
-        self._init: Mapping[int, float] = {}
 
     def send(self, parts: Sequence[NpMap]) -> None:
         neighbors = self.neighbors
@@ -403,53 +403,52 @@ class RiskPropagation(ActorSystem):
 
     def _run(self, scores: NpSeq, contacts: Array) -> Array:
         self.log.clear()
-        _, parts, _ = self.create_graph(scores, contacts)
+        _, parts, u2i, _, no_ne = self.create_graph(scores, contacts)
         self.send(parts)
-        results = ray.get([a.run() for a in self.actors])
+        results = [a.run() for a in self.actors]
+        # Compute the exposure score for those without neighbors.
+        no_ne = {u2i[u]: initial(scores[u])['val'] for u in no_ne}
+        results = ray.get(results)
         self._log_workers(results)
         self._write_log()
-        return self._gather(results)
+        return self._gather(results, u2i, no_ne)
 
     def create_graph(
             self,
             scores: NpSeq,
             contacts: Array
-    ) -> Tuple[Graph, Sequence[NpMap], Index]:
-        """Creates the graph.
-
-        Returns:
-            (graph, partition scores, node-to-partition index)
-        """
-        self._index(scores, contacts)
-        graph, adjlist, n2i = self._add_factors(contacts)
+    ) -> Tuple[Graph, Sequence[NpMap], Index, Index, Set[int]]:
+        u2i, no_ne = self._index(scores, contacts)
+        graph, adjlist, n2i = self._add_factors(contacts, u2i)
         n2p = self._add_vars(graph, adjlist, n2i)
         self._connect(ray.put(graph))
-        parts = self._group(scores, n2i, n2p)
+        parts = self._group(scores, u2i, n2i, n2p, no_ne)
         self._log_stats(graph)
-        return graph, parts, n2p
+        return graph, parts, u2i, n2p, no_ne
 
-    def _index(self, scores: NpSeq, contacts: Array) -> None:
+    @staticmethod
+    def _index(scores: NpSeq, contacts: Array) -> Tuple[Index, Set[int]]:
         # Assumes a name corresponds to an index in scores.
         with_ne = set(contacts['names'].flatten().tolist())
         no_ne = set(range(len(scores))) - with_ne
         # METIS requires 0-based contiguous indexing.
         u2i = {u: i for i, u in enumerate(itertools.chain(with_ne, no_ne))}
-        self._u2i = u2i
-        # Compute the exposure score for those without neighbors.
-        self._init = {u2i[u]: initial(scores[u])['val'] for u in no_ne}
+        return u2i, no_ne
 
-    def _add_factors(self, contacts: Array) -> Tuple[Graph, Sequence, Index]:
-        u2i = self._u2i
-        graph, adj = {}, collections.defaultdict(list)
+    def _add_factors(
+            self,
+            contacts: Array,
+            u2i: Index) -> Tuple[Graph, Sequence, Index]:
+        graph, adjlist = {}, collections.defaultdict(list)
         for contact in contacts:
             u1, u2 = contact['names']
             i1, i2 = u2i[u1], u2i[u2]
-            adj[i1].append(i2)
-            adj[i2].append(i1)
+            adjlist[i1].append(i2)
+            adjlist[i2].append(i1)
             graph[ckey(i1, i2)] = contact['time']
-        n2i = np.array(list(adj))
-        adjlist = [np.array(ne) for ne in adj.values()]
-        self.nodes, self.edges = len(adj), len(graph)
+        n2i = np.array(list(adjlist))
+        adjlist = [np.array(ne) for ne in adjlist.values()]
+        self.nodes, self.edges = len(adjlist), len(graph)
         return graph, adjlist, n2i
 
     def _add_vars(self, graph: Graph, adjlist: Sequence, n2i: Index) -> Index:
@@ -466,12 +465,10 @@ class RiskPropagation(ActorSystem):
         return labels
 
     def _metis_partition(self, adjlist: Sequence) -> Array:
-        import pymetis
         _, labels = pymetis.part_graph(self.workers, adjlist)
         return labels
 
     def _spectral_partition(self, adjlist: Sequence, n2i: Index) -> Array:
-        from sklearn import cluster
         # Ignore warning regarding disconnected graph.
         warnings.filterwarnings('ignore')
         spectral = cluster.SpectralClustering(
@@ -482,8 +479,7 @@ class RiskPropagation(ActorSystem):
         adjmat = self._adjmat(adjlist, n2i)
         return spectral.fit_predict(adjmat)
 
-    def _adjmat(self, adjlist: Sequence, n2i: Index):
-        from scipy import sparse
+    def _adjmat(self, adjlist: Sequence, n2i: Index) -> sparse.spmatrix:
         adjmat = sparse.dok_matrix((self.nodes, self.nodes), dtype=np.int8)
         for n, ne in enumerate(adjlist):
             adjmat[n2i[n], ne] = 1
@@ -510,13 +506,19 @@ class RiskPropagation(ActorSystem):
             max_dur=self.max_dur,
             early_stop=self.early_stop)
 
-    def _group(self, scores: NpSeq, n2i: Index, n2p: Index) -> Sequence[NpMap]:
+    def _group(
+            self,
+            scores: NpSeq,
+            u2i: Index,
+            n2i: Index,
+            n2p: Index,
+            no_ne: Set[int]
+    ) -> Sequence[NpMap]:
         parts = [{} for _ in range(self.workers)]
-        # Exclude those that correspond to users without neighbors.
-        init, u2i = self._init, self._u2i
         i2p = {i: p for i, p in zip(n2i, n2p)}
         for u, uscores in enumerate(scores):
-            if (i := u2i[u]) not in init:
+            if u not in no_ne:
+                i = u2i[u]
                 parts[i2p[i]][i] = uscores
         return parts
 
@@ -534,12 +536,17 @@ class RiskPropagation(ActorSystem):
             'MaxDurationInSeconds': approx(self.max_dur),
             'EarlyStop': self.early_stop})
 
-    def _gather(self, results: Iterable[Result]) -> Array:
-        merged = dict(self._init)
-        for r in results:
-            merged.update(r.data)
-        result = np.zeros(len(self._u2i))
-        for u, i in self._u2i.items():
+    @staticmethod
+    def _gather(
+            results: Iterable[Result],
+            u2i: Index,
+            no_ne: MutableMapping[int, float]
+    ) -> Array:
+        merged = no_ne
+        for result in results:
+            merged.update(result.data)
+        result = np.zeros(len(u2i))
+        for u, i in u2i.items():
             result[u] = merged[i]
         return result
 
