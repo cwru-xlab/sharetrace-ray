@@ -7,14 +7,15 @@ import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple, Union
 
+import igraph as ig
+import networkx as nx
 import numpy as np
 from scipy import stats
 
 from sharetrace import model, util
 from sharetrace.model import ArrayLike
-from sharetrace.util import DateTime
 
 logging.config.dictConfig(util.logging_config())
 
@@ -77,25 +78,23 @@ class TimeFactory(DataFactory):
             self,
             days: int = 15,
             per_day: int = 16,
-            now: Optional[DateTime] = None,
+            now: Optional[int] = None,
             random_first: bool = False):
         assert days > 0
         assert per_day > 0
         super().__init__()
         self.days = days
         self.per_day = per_day
-        self.now = now or datetime.utcnow()
+        self.now = now or datetime.utcnow().timestamp()
         self.random_first = random_first
 
     def __call__(self, n: int) -> np.ndarray:
         create_delta, concat = self.create_delta, np.concatenate
-        dt_type, td_type = 'datetime64[s]', 'timedelta64[s]'
-        now = np.datetime64(self.now).astype(dt_type)
-        offsets = (np.arange(self.days) * SEC_PER_DAY).astype(td_type)
-        starts = now - offsets
-        times = np.zeros((n, self.days * self.per_day), dtype=dt_type)
+        offsets = np.arange(self.days) * SEC_PER_DAY
+        starts = self.now - offsets
+        times = np.zeros((n, self.days * self.per_day), dtype=np.int64)
         for i in range(n):
-            delta = create_delta().astype(td_type)
+            delta = create_delta()
             times[i, :] = concat([start + delta for start in starts])
         if self.random_first:
             rng.shuffle(times, axis=1)
@@ -347,3 +346,135 @@ class ContactFactory(DataFactory):
         contact = model.contact
         edges = graph.edges()
         return np.array([contact(names, t) for names, t in zip(edges, times)])
+
+
+class Graph(ABC):
+    __slots__ = ()
+
+    def __init__(self):
+        super().__init__()
+
+    @property
+    @abstractmethod
+    def num_nodes(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
+    def num_edges(self) -> int:
+        pass
+
+    @abstractmethod
+    def nodes(self, *args) -> Iterable:
+        pass
+
+    @abstractmethod
+    def edges(self, *args) -> Iterable[Tuple]:
+        pass
+
+
+class GraphFactory(DataFactory):
+    __slots__ = ()
+
+    def __init__(self):
+        super().__init__()
+
+    @abstractmethod
+    def __call__(self, n: int) -> Graph:
+        pass
+
+
+class GraphReader(ABC):
+    __slots__ = ()
+
+    def __init__(self):
+        super().__init__()
+
+    @abstractmethod
+    def read(self, path: str) -> Graph:
+        pass
+
+
+class IGraph(Graph):
+    __slots__ = ('_graph',)
+
+    def __init__(self, graph: Union[ig.Graph, nx.Graph]):
+        super().__init__()
+        if isinstance(graph, nx.Graph):
+            graph = ig.Graph.from_networkx(graph)
+        self._graph = graph
+
+    @property
+    def num_nodes(self) -> int:
+        return len(self._graph.vs)
+
+    @property
+    def num_edges(self) -> int:
+        return len(self._graph.es)
+
+    def nodes(self, *args) -> Iterable:
+        nodes = self._graph.vs
+        if args:
+            if len(args) == 1:
+                k = args[0]
+                nodes = ((n.index, n[k]) for n in nodes)
+            else:
+                nodes = ((n.index, tuple(n[k] for k in args)) for n in nodes)
+        else:
+            nodes = iter(nodes.indices)
+        return nodes
+
+    def edges(self, *args) -> Iterable[Tuple]:
+        edges = self._graph.es
+        if args:
+            if len(args) == 1:
+                k = args[0]
+                edges = ((e.tuple, e[k]) for e in edges)
+            else:
+                edges = ((e.tuple, tuple(e[k] for k in args)) for e in edges)
+        else:
+            edges = (e.tuple for e in edges)
+        return edges
+
+
+class SocioPatternsGraphReader(GraphReader):
+    __slots__ = ('sep',)
+
+    def __init__(self, sep=' '):
+        super().__init__()
+        self.sep = sep
+
+    def read(self, path: str) -> Graph:
+        def _id(name, g, index, curr_idx):
+            if name in idx:
+                i = index[name]
+            else:
+                g.add_vertex(name)
+                index[name] = i = curr_idx
+                curr_idx += 1
+            return i, curr_idx
+
+        with open(path, 'r') as f:
+            graph, idx, curr = ig.Graph(), {}, 0
+            add_edge = graph.add_edge
+            while line := f.readline():
+                args = line.rstrip('\n').split(self.sep)
+                t, n1, n2 = args[:3]
+                i1, curr = _id(n1, graph, idx, curr)
+                i2, curr = _id(n2, graph, idx, curr)
+                add_edge(i1, i2, time=int(t))
+            return IGraph(graph)
+
+
+class SocioPatternsContactFactory(DataFactory):
+    __slots__ = ('path', 'sep')
+
+    def __init__(self, path: str, sep: str = ' '):
+        super().__init__()
+        self.path = path
+        self.sep = sep
+
+    def __call__(self, n: int = None) -> np.ndarray:
+        graph = SocioPatternsGraphReader(self.sep).read(self.path)
+        contact = model.contact
+        return np.array([contact(names, t) for names, t in graph.edges('time')])
