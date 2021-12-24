@@ -19,8 +19,7 @@ def risk_score(val: float, time: int) -> np.void:
     Returns:
         A structured array with attributes 'val' and 'time'.
     """
-    time = np.int64(time)
-    dt = [('val', np.float64), ('time', time.dtype)]
+    dt = [('val', np.float64), ('time', np.int64)]
     return np.array([(val, time)], dtype=dt)[0]
 
 
@@ -42,11 +41,10 @@ def temporal_loc(loc: Union[str, LatLong], time: DateTime) -> np.void:
         Returns:
             A structured array with attributes 'time' and 'loc'.
         """
-    time = np.int64(time)
     if isinstance(loc, str):
-        dt = [('loc', f'<U{len(loc)}'), ('time', time.dtype)]
+        dt = [('loc', f'<U{len(loc)}'), ('time', np.int64)]
     else:
-        dt = [('loc', np.float64, (2,)), ('time', time.dtype)]
+        dt = [('loc', np.float64, (2,)), ('time', np.int64)]
     return np.array([(loc, time)], dtype=dt)[0]
 
 
@@ -89,8 +87,8 @@ def contact(names: ArrayLike, time: int) -> np.void:
     Returns:
         A structured array with attributes 'names' and 'time'.
     """
-    names, time = np.asarray(names), np.int64(time)
-    dt = [('names', names.dtype, names.shape), ('time', time.dtype)]
+    names = np.array(names)
+    dt = [('names', names.dtype, names.shape), ('time', np.int64)]
     return np.array([(names, time)], dtype=dt)[0]
 
 
