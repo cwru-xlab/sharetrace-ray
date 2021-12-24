@@ -5,6 +5,7 @@ import logging
 from logging import config
 
 import tqdm
+
 from evaluation import synthetic
 from sharetrace import propagation, search, util
 from sharetrace.propagation import Array, NpSeq
@@ -131,7 +132,7 @@ def exp5():
 
 
 def new_contact_search(logger=None):
-    return search.ContactSearch(min_dur=15, tol=200, workers=-1, logger=logger)
+    return search.ContactSearch(min_dur=900, tol=200, workers=-1, logger=logger)
 
 
 def main(e=None):

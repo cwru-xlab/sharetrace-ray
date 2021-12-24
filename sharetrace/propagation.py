@@ -33,7 +33,7 @@ Log = MutableMapping[str, Any]
 Real = (int, float)
 
 ACTOR_SYSTEM = -1
-DAY = np.timedelta64(1, 'D')
+SEC_PER_DAY = 86400
 
 
 def ckey(n1: int, n2: int) -> Tuple[int, int]:
@@ -172,7 +172,7 @@ class _Partition(Actor):
             early_stop: Optional[int] = None):
         super().__init__(name, mailbox)
         self.graph = graph
-        self.time_buffer = np.timedelta64(time_buffer, 'm')
+        self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
         self.tol = tol
@@ -278,7 +278,7 @@ class _Partition(Actor):
             ctime = graph[ckey(var, f)]
             if len(scores := scores[scores['time'] <= ctime + buffer]) > 0:
                 # Scales time deltas in partial days.
-                diff = clip((scores['time'] - ctime) / DAY, -np.inf, 0)
+                diff = clip((scores['time'] - ctime) / SEC_PER_DAY, -np.inf, 0)
                 # Use the log transform to avoid overflow issues.
                 weighted = log(scores['val']) + (diff / const)
                 score = scores[argmax(weighted)]
@@ -353,7 +353,7 @@ class RiskPropagation(ActorSystem):
 
     def __init__(
             self,
-            time_buffer: int = 2880,
+            time_buffer: int = 172_800,
             time_const: float = 1.,
             transmission: float = 0.8,
             tol: float = 0.1,
@@ -528,7 +528,7 @@ class RiskPropagation(ActorSystem):
             'GraphSizeInMb': approx(util.get_mb(graph)),
             'Nodes': int(self.nodes),
             'Edges': int(self.edges),
-            'TimeBufferInMinutes': float(self.time_buffer),
+            'TimeBufferInSeconds': float(self.time_buffer),
             'Transmission': approx(self.transmission),
             'SendTolerance': approx(self.tol),
             'Workers': int(self.workers),

@@ -1,4 +1,3 @@
-import datetime
 import json
 import logging
 from typing import Optional, Sequence, Tuple, Union
@@ -31,7 +30,7 @@ class ContactSearch:
 
     def __init__(
             self,
-            min_dur: float = 0,
+            min_dur: int = 900,
             r: float = 1e-4,
             leaf_size: int = 10,
             tol: float = 200,
@@ -41,7 +40,7 @@ class ContactSearch:
         """Configures contact search.
 
         Args:
-            min_dur: Minimum duration (minutes) for a contact.
+            min_dur: Minimum duration (seconds) for a contact.
             r: Radius (meters) used by the ball tree to find nearest neighbors.
             leaf_size: Number of points in a leaf before using brute force.
             tol: Minimum distance (meters) b/t two locations to be "in contact."
@@ -112,8 +111,7 @@ class ContactSearch:
             if len(options := np.flatnonzero(durations >= self.min_dur)) > 0:
                 names = (hist1['name'], hist2['name'])
                 start, _ = ints[options[-1]]
-                time = datetime.datetime.utcfromtimestamp(times1[start] * 60)
-                contact = model.contact(names, time)
+                contact = model.contact(names, times1[start])
         return contact
 
     def proximal(self, locs1: Array, locs2: Array) -> Array:

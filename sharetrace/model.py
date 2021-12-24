@@ -3,23 +3,23 @@ from typing import Sequence, Tuple, Union, overload
 import numpy as np
 import pygeohash
 
-from sharetrace.util import DateTime, TimeDelta
+from sharetrace.util import DateTime
 
 ArrayLike = Union[Sequence, Tuple, np.ndarray]
 LatLong = Tuple[float, float]
 
 
-def risk_score(val: float, time: DateTime) -> np.void:
+def risk_score(val: float, time: int) -> np.void:
     """Creates a timestamped risk probability.
 
     Args:
         val: A 64-bit float between 0 and 1, inclusive.
-        time: A datetime datetime or numpy np.datetime64.
+        time: A 64-bit integer timestamp.
 
     Returns:
         A structured array with attributes 'val' and 'time'.
     """
-    time = np.datetime64(time)
+    time = np.int64(time)
     dt = [('val', np.float64), ('time', time.dtype)]
     return np.array([(val, time)], dtype=dt)[0]
 
@@ -37,12 +37,12 @@ def temporal_loc(loc: Union[str, LatLong], time: DateTime) -> np.void:
 
         Args:
             loc: A string geohash or a (latitude, longitude) tuple.
-            time: A datetime datetime or numpy np.datetime64.
+            time: A 64-bit integer timestamp.
 
         Returns:
             A structured array with attributes 'time' and 'loc'.
         """
-    time = np.datetime64(time)
+    time = np.int64(time)
     if isinstance(loc, str):
         dt = [('loc', f'<U{len(loc)}'), ('time', time.dtype)]
     else:
@@ -80,16 +80,16 @@ def to_coord(geohash: np.void) -> np.void:
     return temporal_loc((lat, long), geohash['time'])
 
 
-def contact(names: ArrayLike, time: DateTime) -> np.void:
+def contact(names: ArrayLike, time: int) -> np.void:
     """Creates a named event.
 
     Args:
         names: An array-like object, typically of length 2.
-        time: A datetime datetime or numpy datetime64.
+        time: A 64-bit integer timestamp.
     Returns:
         A structured array with attributes 'names' and 'time'.
     """
-    names, time = np.asarray(names), np.datetime64(time)
+    names, time = np.asarray(names), np.int64(time)
     dt = [('names', names.dtype, names.shape), ('time', time.dtype)]
     return np.array([(names, time)], dtype=dt)[0]
 
