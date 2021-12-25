@@ -282,9 +282,9 @@ class DatasetFactory(DataFactory):
 
     def __init__(
             self,
-            score_factory: ScoreFactory,
-            history_factory: Optional[HistoryFactory] = None,
-            contact_factory: Optional[ContactFactory] = None):
+            score_factory: DataFactory,
+            history_factory: Optional[DataFactory] = None,
+            contact_factory: Optional[DataFactory] = None):
         super().__init__()
         self.score_factory = score_factory
         self.history_factory = history_factory
@@ -297,7 +297,7 @@ class DatasetFactory(DataFactory):
             histories = factory(n)
         if (factory := self.contact_factory) is not None:
             contacts = factory(n)
-        return Dataset(scores, histories, contacts)
+        return Dataset(scores=scores, histories=histories, contacts=contacts)
 
 
 class ScoreFactory(DataFactory):
@@ -445,36 +445,64 @@ class SocioPatternsGraphReader(GraphReader):
         self.sep = sep
 
     def read(self, path: str) -> Graph:
-        def _id(name, g, index, curr_idx):
-            if name in idx:
-                i = index[name]
-            else:
-                g.add_vertex(name)
-                index[name] = i = curr_idx
-                curr_idx += 1
-            return i, curr_idx
-
         with open(path, 'r') as f:
-            graph, idx, curr = ig.Graph(), {}, 0
-            add_edge = graph.add_edge
-            while line := f.readline():
-                args = line.rstrip('\n').split(self.sep)
-                t, n1, n2 = args[:3]
-                i1, curr = _id(n1, graph, idx, curr)
-                i2, curr = _id(n2, graph, idx, curr)
-                add_edge(i1, i2, time=int(t))
+            triples = np.array([
+                line.rstrip('\n').split(self.sep) for line in f.readlines()],
+                dtype=np.int64)
+            times, pairs = triples[:, 0], triples[:, [1, 2]]
+            idx = {n: i for i, n in enumerate(np.unique(pairs))}
+            unique = np.unique(pairs, axis=0)
+            times = np.array([
+                np.max(times[(pairs == p).all(1)]) for p in unique])
+            graph = ig.Graph(
+                edges=[(idx[n1], idx[n2]) for n1, n2 in unique],
+                edge_attrs={'time': times})
             return IGraph(graph)
 
 
+class SocioPatternsDatasetFactory(DataFactory):
+    __slots__ = ('score_factory', 'contact_factory')
+
+    def __init__(
+            self,
+            score_factory: SocioPatternsScoreFactory,
+            contact_factory: SocioPatternsContactFactory):
+        super().__init__()
+        self.score_factory = score_factory
+        self.contact_factory = contact_factory
+
+    def __call__(self, n: int = None) -> Dataset:
+        contacts = self.contact_factory(n)
+        self.score_factory.set_now(self.contact_factory.start)
+        scores = self.score_factory(self.contact_factory.nodes)
+        return Dataset(scores=scores, contacts=contacts)
+
+
+class SocioPatternsScoreFactory(ScoreFactory):
+    __slots__ = ()
+
+    def __init__(self, value_factory: DataFactory, time_factory: TimeFactory):
+        super().__init__(value_factory, time_factory)
+
+    def __call__(self, n: int) -> np.ndarray:
+        return super().__call__(n)
+
+    def set_now(self, now: int) -> None:
+        self.time_factory.now = now
+
+
 class SocioPatternsContactFactory(DataFactory):
-    __slots__ = ('path', 'sep')
+    __slots__ = ('path', 'sep', 'nodes', 'start')
 
     def __init__(self, path: str, sep: str = ' '):
         super().__init__()
         self.path = path
         self.sep = sep
+        self.nodes = -1
+        self.start = -1
 
     def __call__(self, n: int = None) -> np.ndarray:
         graph = SocioPatternsGraphReader(self.sep).read(self.path)
+        self.nodes, self.start = graph.num_nodes, min(graph.edges('time'))[-1]
         contact = model.contact
         return np.array([contact(names, t) for names, t in graph.edges('time')])
