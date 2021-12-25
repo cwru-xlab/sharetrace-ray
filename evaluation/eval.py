@@ -2,12 +2,13 @@ import argparse
 import itertools
 import json
 import logging
+import pprint
 from logging import config
 
 import tqdm
 
 from evaluation import synthetic
-from sharetrace import propagation, search, util
+from sharetrace import model, propagation, search, util
 from sharetrace.propagation import Array, NpSeq
 
 logging.config.dictConfig(util.logging_config())
@@ -135,7 +136,29 @@ def new_contact_search(logger=None):
     return search.ContactSearch(min_dur=900, tol=200, workers=-1, logger=logger)
 
 
+def model_object_sizes():
+    score = model.risk_score(1, 1)
+    min_geohash = model.temporal_loc('a', 1)
+    max_geohash = model.temporal_loc('abcdefghijkl', 1)
+    coord = model.temporal_loc((0, 0), 1)
+    objects = {
+        'risk score': score.nbytes,
+        'min geohash': min_geohash.nbytes,
+        'max geohash': max_geohash.nbytes,
+        'coord': coord.nbytes,
+        'contact': model.contact((0, 0), 1).nbytes,
+        'msg': model.message([score], 1, 1, 1, 1).nbytes,
+        'min geohash history': model.history([min_geohash], 0).nbytes,
+        'max geohash history': model.history([max_geohash], 0).nbytes,
+        'coord history': model.history([coord], 0).nbytes}
+    pprint.pprint(objects, indent=1)
+
+
 def main(e=None):
     if e is None:
         e = parse().experiment
     eval(f'exp{e}()')
+
+
+if __name__ == '__main__':
+    model_object_sizes()

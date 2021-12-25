@@ -3,8 +3,6 @@ from typing import Sequence, Tuple, Union, overload
 import numpy as np
 import pygeohash
 
-from sharetrace.util import DateTime
-
 ArrayLike = Union[Sequence, Tuple, np.ndarray]
 LatLong = Tuple[float, float]
 
@@ -24,14 +22,14 @@ def risk_score(val: float, time: int) -> np.void:
 
 
 @overload
-def temporal_loc(loc: LatLong, time: DateTime) -> np.void: ...
+def temporal_loc(loc: LatLong, time: int) -> np.void: ...
 
 
 @overload
-def temporal_loc(loc: str, time: DateTime) -> np.void: ...
+def temporal_loc(loc: str, time: int) -> np.void: ...
 
 
-def temporal_loc(loc: Union[str, LatLong], time: DateTime) -> np.void:
+def temporal_loc(loc: Union[str, LatLong], time: int) -> np.void:
     """Creates a temporal location.
 
         Args:
@@ -108,7 +106,7 @@ def history(locs: ArrayLike, name: int) -> np.void:
 
 
 def message(
-        val: np.ndarray,
+        val: ArrayLike,
         src: int,
         sgroup: int,
         dest: int,
@@ -125,6 +123,7 @@ def message(
     Returns:
        An array with attributes 'val', 'src', 'sgroup', 'dest', and 'dgroup'.
     """
+    val = np.array(val)
     dt = [
         ('val', val.dtype, val.shape),
         ('src', np.int64),

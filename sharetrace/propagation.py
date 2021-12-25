@@ -346,6 +346,7 @@ class RiskPropagation(ActorSystem):
         'max_dur',
         'early_stop',
         'partitioning',
+        'auto',
         'logger',
         'nodes',
         'edges',
@@ -362,6 +363,7 @@ class RiskPropagation(ActorSystem):
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None,
             partitioning: str = 'spectral',
+            auto: bool = True,
             logger: Optional[logging.Logger] = None):
         super().__init__(ACTOR_SYSTEM)
         assert isinstance(time_buffer, int) and time_buffer > 0
@@ -384,6 +386,7 @@ class RiskPropagation(ActorSystem):
         self.max_dur = max_dur
         self.early_stop = early_stop
         self.partitioning = partitioning
+        self.auto = auto
         self.logger = logger
         self.nodes: int = -1
         self.edges: int = -1
@@ -396,14 +399,25 @@ class RiskPropagation(ActorSystem):
 
     def run(self, scores: NpSeq, contacts: Array) -> Array:
         assert len(scores) > 0 and len(contacts) > 0
-        ray.init()
+        if self.auto:
+            self.on_start()
         result = self._run(scores, contacts)
-        ray.shutdown()
+        if self.auto:
+            self.on_stop()
         return result
+
+    def on_start(self):
+        ray.init()
+
+    def on_stop(self):
+        ray.shutdown()
 
     def _run(self, scores: NpSeq, contacts: Array) -> Array:
         self.log.clear()
-        _, parts, u2i, _, no_ne = self.create_graph(scores, contacts)
+        timed = util.time(
+            lambda: self.create_graph(scores, contacts))
+        graph, parts, u2i, _, no_ne = timed.result
+        self._log_stats(graph, timed.seconds)
         self.send(parts)
         results = [a.run() for a in self.actors]
         # Compute the exposure score for those without neighbors.
@@ -423,7 +437,6 @@ class RiskPropagation(ActorSystem):
         n2p = self._add_vars(graph, adjlist, n2i)
         self._connect(ray.put(graph))
         parts = self._group(scores, u2i, n2i, n2p, no_ne)
-        self._log_stats(graph)
         return graph, parts, u2i, n2p, no_ne
 
     @staticmethod
@@ -452,7 +465,9 @@ class RiskPropagation(ActorSystem):
         return graph, adjlist, n2i
 
     def _add_vars(self, graph: Graph, adjlist: Sequence, n2i: Index) -> Index:
-        n2p = self.partition(adjlist, n2i)
+        timed = util.time(lambda: self.partition(adjlist, n2i))
+        self.log['PartitionTimeInSeconds'] = util.approx(timed.seconds)
+        n2p = timed.result
         node = model.node
         graph.update((n2i[n], node(ne, n2p[n])) for n, ne in enumerate(adjlist))
         return n2p
@@ -522,10 +537,11 @@ class RiskPropagation(ActorSystem):
                 parts[i2p[i]][i] = uscores
         return parts
 
-    def _log_stats(self, graph: Graph) -> None:
+    def _log_stats(self, graph: Graph, runtime: float) -> None:
         approx = util.approx
         self.log.update({
             'GraphSizeInMb': approx(util.get_mb(graph)),
+            'GraphBuildTimeInSeconds': approx(runtime),
             'Nodes': int(self.nodes),
             'Edges': int(self.edges),
             'TimeBufferInSeconds': float(self.time_buffer),
