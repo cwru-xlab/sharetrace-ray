@@ -249,6 +249,7 @@ class _Partition(Actor):
             self._since_update += 1
 
     def on_start(self, scores: NpMap) -> None:
+        """Assign node attributes and send symptom scores."""
         nodes = {}
         transmission = self.transmission
         for var, vscores in scores.items():
@@ -398,12 +399,14 @@ class RiskPropagation(ActorSystem):
             neighbors[p].put_nowait(pscores)
 
     def run(self, scores: NpSeq, contacts: Array) -> Array:
-        assert len(scores) > 0 and len(contacts) > 0
-        if self.auto:
-            self.on_start()
-        result = self._run(scores, contacts)
-        if self.auto:
-            self.on_stop()
+        if len(scores) == 0 or len(contacts) == 0:
+            result = np.array([])
+        else:
+            if self.auto:
+                self.on_start()
+            result = self._run(scores, contacts)
+            if self.auto:
+                self.on_stop()
         return result
 
     def on_start(self):

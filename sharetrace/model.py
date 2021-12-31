@@ -77,11 +77,12 @@ def to_coord(geohash: np.void) -> np.void:
 
 
 def contact(names: ArrayLike, time: int) -> np.void:
-    """Creates a named event.
+    """Creates an occurrence between named entities.
 
     Args:
         names: An array-like object, typically of length 2.
         time: A 64-bit integer timestamp.
+
     Returns:
         A structured array with attributes 'names' and 'time'.
     """

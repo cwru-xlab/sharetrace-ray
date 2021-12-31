@@ -61,9 +61,6 @@ class Actor:
         return self is o or (isinstance(o, Actor) and self.name == o.name)
 
 
-Actors = Union[Iterable, Actor]
-
-
 class ActorSystem(Actor):
     """Coordinates a collection of actors.
 
@@ -77,7 +74,11 @@ class ActorSystem(Actor):
         super().__init__(name, mailbox, **kwargs)
         self.actors = set()
 
-    def connect(self, *actors: Actors, duplex: bool = False) -> None:
+    def connect(
+            self,
+            *actors: Union[Iterable, Actor],
+            duplex: bool = False
+    ) -> None:
         """Connects actors to each other and the system."""
         add = self.actors.add
         for a in actors:

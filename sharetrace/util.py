@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 import timeit
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 
@@ -126,9 +126,11 @@ def get_bytes(obj, seen=None):
     return size
 
 
-def approx(val):
-    return val if val is None else round(float(val), 4)
+def approx(val: Optional, prec=4) -> Optional[float]:
+    """Approximates the value to given precision."""
+    return val if val is None else round(float(val), prec)
 
 
-def sdiv(a, b) -> float:
+def sdiv(a: float, b: float) -> float:
+    """Returns the quotient of a and b, or 0 if b is 0."""
     return 0 if b == 0 else a / b
