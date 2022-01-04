@@ -534,17 +534,24 @@ class SocioPatternsScoreFactory(ScoreFactory):
 
 
 class SocioPatternsContactFactory(DataFactory):
-    __slots__ = ('path', 'sep', 'nodes', 'start')
+    __slots__ = ('path', 'sep', 'nodes', 'start', 'graph_path')
 
-    def __init__(self, path: str, sep: str = ' '):
+    def __init__(
+            self,
+            path: str,
+            sep: str = ' ',
+            graph_path: Optional[str] = None):
         super().__init__()
         self.path = path
         self.sep = sep
+        self.graph_path = graph_path
         self.nodes = -1
         self.start = -1
 
     def __call__(self, n: int = None, now: int = None, **kwargs) -> np.ndarray:
         graph = SocioPatternsGraphReader(self.sep).read(self.path)
+        if (path := self.graph_path) is not None:
+            graph.save(path)
         self.nodes = graph.num_nodes
         # Raw contact times are nonzero and shifted forward from now. To
         # ensure all risk score timestamps are prior to the first contact,

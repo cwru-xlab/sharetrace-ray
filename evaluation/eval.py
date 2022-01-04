@@ -24,8 +24,8 @@ from synthetic import (ContactFactory, DataFactory, Dataset, DatasetFactory,
 SCALABILITY_DIR = './/logs//scalability'
 pathlib.Path(SCALABILITY_DIR).mkdir(parents=True, exist_ok=True)
 
-PARAMETER_DIR = './/logs//parameters'
-pathlib.Path(PARAMETER_DIR).mkdir(parents=True, exist_ok=True)
+PARAMS_DIR = './/logs//parameters'
+pathlib.Path(PARAMS_DIR).mkdir(parents=True, exist_ok=True)
 
 REAL_WORLD_DIR = './/logs//real-world'
 pathlib.Path(REAL_WORLD_DIR).mkdir(parents=True, exist_ok=True)
@@ -58,6 +58,7 @@ def create_sociopatterns_data(
         path: str,
         sep: str = ' ',
         p: float = 0.2,
+        graph_path: Optional[str] = None,
         seed=None
 ) -> Dataset:
     dataset_factory = SocioPatternsDatasetFactory(
@@ -65,7 +66,8 @@ def create_sociopatterns_data(
             value_factory=UniformBernoulliValueFactory(
                 per_user=1, p=p, seed=seed),
             time_factory=TimeFactory(days=1, per_day=1, seed=seed)),
-        contact_factory=SocioPatternsContactFactory(path=path, sep=sep))
+        contact_factory=SocioPatternsContactFactory(
+            path=path, sep=sep, graph_path=graph_path))
     return dataset_factory()
 
 
@@ -234,13 +236,15 @@ class ParameterExperiments(SyntheticExperiments):
         super().__init__(seed)
 
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
+        graph_path = os.path.join(PARAMS_DIR, self._logfile(graph, 'graphml'))
         dataset = create_synthetic_data(
             users=10_000,
             graph_factory=graph_factory,
             days=15,
             p=0.2,
+            graph_path=graph_path,
             seed=self.seed)
-        logger = get_logger(PARAMETER_DIR, self._logfile(graph))
+        logger = get_logger(PARAMS_DIR, self._logfile(graph, 'log'))
         # transmission = 1 never terminates because of no decay.
         loop = list(itertools.product(range(1, 11), range(1, 10)))
         for tol, transmission in tqdm.tqdm(loop):
@@ -253,8 +257,8 @@ class ParameterExperiments(SyntheticExperiments):
             risk_prop.run(dataset.scores, dataset.contacts)
 
     @staticmethod
-    def _logfile(graph: str) -> str:
-        return f'{graph}-{round(time.time())}.log'
+    def _logfile(graph: str, ext: str) -> str:
+        return f'{graph}-{round(time.time())}.{ext}'
 
 
 class RealWorldExperiments:
@@ -264,9 +268,9 @@ class RealWorldExperiments:
         self.seed = seed
 
     def benchmark(self, setting: str, path: str) -> None:
-        if setting == 'high-school11':
+        if setting == 'highschool11':
             self.benchmark_high_school11(path)
-        elif setting == 'high-school12':
+        elif setting == 'highschool12':
             self.benchmark_high_school12(path)
         elif setting == 'conference':
             self.benchmark_conference(path)
@@ -274,14 +278,14 @@ class RealWorldExperiments:
             self.benchmark_workplace(path)
         else:
             raise ValueError(
-                f"'setting' must be one of ('high-school11', 'high-school12', "
+                f"'setting' must be one of ('highschool11', 'highschool12', "
                 f"'conference', 'workplace'), not {setting}")
 
     def benchmark_high_school11(self, path: str) -> None:
-        self._benchmark(setting='high-school11', path=path, sep='\t')
+        self._benchmark(setting='highschool11', path=path, sep='\t')
 
     def benchmark_high_school12(self, path: str) -> None:
-        self._benchmark(setting='high-school12', path=path, sep='\t')
+        self._benchmark(setting='highschool12', path=path, sep='\t')
 
     def benchmark_conference(self, path: str) -> None:
         self._benchmark(setting='conference', path=path, sep=' ')
@@ -290,18 +294,24 @@ class RealWorldExperiments:
         self._benchmark(setting='workplace', path=path, sep=' ')
 
     def _benchmark(self, setting: str, path: str, sep: str) -> None:
-        logger = get_logger(REAL_WORLD_DIR, self._logfile(setting))
+        get_logfile = self._logfile
+        logger = get_logger(REAL_WORLD_DIR, get_logfile(setting, 'log'))
         seed = self.seed
-        for _ in tqdm.trange(10):
+        for i in tqdm.trange(10):
+            if i == 0:
+                graph_path = os.path.join(
+                    REAL_WORLD_DIR, get_logfile(setting, 'graphml'))
+            else:
+                graph_path = None
             dataset = create_sociopatterns_data(
-                path=path, sep=sep, p=0.2, seed=seed)
+                path=path, sep=sep, p=0.2, graph_path=graph_path, seed=seed)
             risk_prop = propagation.RiskPropagation(
                 tol=0.3, workers=4, timeout=5, logger=logger)
             risk_prop.run(dataset.scores, dataset.contacts)
 
     @staticmethod
-    def _logfile(setting: str) -> str:
-        return f'{setting}-{round(time.time())}.log'
+    def _logfile(setting: str, ext: str) -> str:
+        return f'{setting}-{round(time.time())}.{ext}'
 
 
 def parse_scalability_exps(args: argparse.Namespace) -> None:
@@ -335,7 +345,7 @@ def main():
     real_world = subparsers.add_parser('real-world')
     real_world.add_argument(
         '--setting',
-        choices=('workplace', 'high-school11', 'high-school12', 'conference'),
+        choices=('workplace', 'highschool11', 'highschool12', 'conference'),
         required=True)
     real_world.add_argument('--path', required=True)
     real_world.add_argument('--seed', type=int, default=None)

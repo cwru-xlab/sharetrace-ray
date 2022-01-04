@@ -25,4 +25,4 @@ pip install -e ~/$PACKAGE
 cd ~/$PACKAGE/evaluation
 
 python3 eval.py real-world \
-    --setting high-school12 --path data/highschool_2012.csv --seed 12345
+    --setting highschool12 --path data/highschool_2012.csv --seed 12345
