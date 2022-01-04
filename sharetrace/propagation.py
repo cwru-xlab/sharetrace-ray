@@ -146,6 +146,7 @@ class _Partition(Actor):
         'transmission',
         'tol',
         'empty',
+        'eps',
         'timeout',
         'max_dur',
         'early_stop',
@@ -168,6 +169,7 @@ class _Partition(Actor):
             transmission: float,
             tol: float,
             empty: Type,
+            eps: float,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None):
@@ -274,9 +276,10 @@ class _Partition(Actor):
 
     def _send(self, scores: Array, var: int, factors: Array) -> None:
         """Compute a factor node message and send if it will be effective."""
-        graph, init, sgroup, send, buffer, tol, const, transmission = (
+        graph, init, sgroup, send, buffer, tol, eps, const, transmission = (
             self.graph, self._nodes[var]['init_msg'], self.name, self.send,
-            self.time_buffer, self.tol, self.time_const, self.transmission)
+            self.time_buffer, self.tol, self.eps, self.time_const,
+            self.transmission)
         message, clip, log, argmax = model.message, np.clip, np.log, np.argmax
         for f in factors:
             # Only consider scores that may have been transmitted from contact.
@@ -285,7 +288,8 @@ class _Partition(Actor):
                 # Scales time deltas in partial days.
                 diff = clip((scores['time'] - ctime) / SEC_PER_DAY, -np.inf, 0)
                 # Use the log transform to avoid overflow issues.
-                weighted = log(scores['val']) + (diff / const)
+                val = log(eps if scores['val'] <= eps else scores['val'])
+                weighted = val + (diff / const)
                 score = scores[argmax(weighted)]
                 score['val'] *= transmission
                 # This is a necessary, but not sufficient, condition for the
@@ -346,6 +350,7 @@ class RiskPropagation(ActorSystem):
         'time_const',
         'transmission',
         'tol',
+        'eps',
         'workers',
         'timeout',
         'max_dur',
@@ -363,6 +368,7 @@ class RiskPropagation(ActorSystem):
             time_const: float = 1.,
             transmission: float = 0.8,
             tol: float = 0.1,
+            eps: float = 1e-7,
             workers: int = 1,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
@@ -386,6 +392,7 @@ class RiskPropagation(ActorSystem):
         self.time_const = time_const
         self.transmission = transmission
         self.tol = tol
+        self.eps = eps
         self.workers = workers
         self.timeout = timeout
         self.max_dur = max_dur
@@ -536,6 +543,7 @@ class RiskPropagation(ActorSystem):
             time_const=self.time_const,
             transmission=self.transmission,
             tol=self.tol,
+            eps=self.eps,
             empty=queue.Empty,
             timeout=self.timeout,
             max_dur=self.max_dur,
