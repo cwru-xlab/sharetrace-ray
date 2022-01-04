@@ -1,9 +1,12 @@
 import argparse
+import functools
+import itertools
 import logging
 import os.path
 import pathlib
 import pprint
 import time
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import igraph as ig
@@ -21,6 +24,31 @@ from synthetic import (ContactFactory, DataFactory, Dataset, DatasetFactory,
 SCALABILITY_DIR = './/logs//scalability'
 pathlib.Path(SCALABILITY_DIR).mkdir(parents=True, exist_ok=True)
 
+PARAMETER_DIR = './/logs//parameters'
+pathlib.Path(PARAMETER_DIR).mkdir(parents=True, exist_ok=True)
+
+REAL_WORLD_DIR = './/logs//real-world'
+pathlib.Path(REAL_WORLD_DIR).mkdir(parents=True, exist_ok=True)
+
+
+def model_object_sizes():
+    score = model.risk_score(1, 1)
+    min_geohash = model.temporal_loc('a', 1)
+    max_geohash = model.temporal_loc('abcdefghijkl', 1)
+    coord = model.temporal_loc((0, 0), 1)
+    objects = {
+        'risk score': score.nbytes,
+        'min geohash': min_geohash.nbytes,
+        'max geohash': max_geohash.nbytes,
+        'coord': coord.nbytes,
+        'contact': model.contact((0, 0), 1).nbytes,
+        'msg': model.message([], 1, 1, 1, 1).nbytes,
+        'min geohash history': model.history([min_geohash], 0).nbytes,
+        'max geohash history': model.history([max_geohash], 0).nbytes,
+        'coord history': model.history([coord], 0).nbytes,
+        'node': model.node([1], 1).nbytes}
+    pprint.pprint(objects, indent=1)
+
 
 def filter_isolated(g: ig.Graph) -> ig.Graph:
     return g.subgraph(g.vs.select(_degree_gt=0))
@@ -29,7 +57,6 @@ def filter_isolated(g: ig.Graph) -> ig.Graph:
 def create_sociopatterns_data(
         path: str,
         sep: str = ' ',
-        users: int = 1000,
         days: int = 15,
         p: float = 0.2,
         seed=None
@@ -40,7 +67,7 @@ def create_sociopatterns_data(
                 per_user=days, p=p, seed=seed),
             time_factory=TimeFactory(days=days, per_day=1, seed=seed)),
         contact_factory=SocioPatternsContactFactory(path=path, sep=sep))
-    return dataset_factory(users)
+    return dataset_factory()
 
 
 def create_synthetic_data(
@@ -64,11 +91,55 @@ def create_synthetic_data(
     return dataset_factory(users)
 
 
+def create_geometric_graph(n: int, seed=None) -> Graph:
+    graph = nx.generators.random_geometric_graph(
+        n, radius=geometric_radius(n), seed=seed)
+    graph = filter_isolated(ig.Graph.from_networkx(graph))
+    return synthetic.IGraph(graph)
+
+
+def geometric_radius(n: int) -> float:
+    return min(1, 0.25 ** (np.log10(n) - 1))
+
+
+def create_power_law_cluster_graph(n: int, seed=None) -> Graph:
+    graph = nx.generators.powerlaw_cluster_graph(
+        n, m=2, p=0.95, seed=seed)
+    graph = filter_isolated(ig.Graph.from_networkx(graph))
+    return synthetic.IGraph(graph)
+
+
+def create_lfr_graph(n: int, seed=None) -> Graph:
+    graph = nx.generators.LFR_benchmark_graph(
+        n,
+        tau1=3,
+        tau2=2,
+        mu=0.1,
+        min_degree=3,
+        max_degree=50,
+        min_community=10,
+        max_community=100,
+        seed=seed)
+    # Wrap with filter_isolated() if min_degree < 2
+    return synthetic.IGraph(ig.Graph.from_networkx(graph))
+
+
+def get_logger(directory: str, logfile: str) -> logging.Logger:
+    logger = logging.getLogger(logfile)
+    logger.setLevel(logging.INFO)
+    handler = logging.FileHandler(
+        filename=os.path.join(directory, logfile), mode='w')
+    handler.setFormatter(logging.Formatter('%(message)s'))
+    logger.addHandler(handler)
+    return logger
+
+
 # noinspection PyTypeChecker
-class ScalabilityExperiments:
+class SyntheticExperiments(ABC):
     __slots__ = ('seed',)
 
     def __init__(self, seed=None):
+        super().__init__()
         self.seed = seed
 
     def benchmark(self, graph: str):
@@ -84,43 +155,31 @@ class ScalabilityExperiments:
                 f"not {graph}")
 
     def benchmark_geometric(self) -> None:
-        self._benchmark(self._create_geometric, 'geometric')
+        graph_factory = functools.partial(
+            lambda n: create_geometric_graph(n, seed=self.seed))
+        self._benchmark(graph_factory, 'geometric')
 
     def benchmark_power_law_cluster(self) -> None:
-        self._benchmark(self._create_power_law_cluster, 'power')
+        graph_factory = functools.partial(
+            lambda n: create_power_law_cluster_graph(n, seed=self.seed))
+        self._benchmark(graph_factory, 'power')
 
     def benchmark_lfr(self) -> None:
-        self._benchmark(self._create_lfr, 'lfr')
+        graph_factory = functools.partial(
+            lambda n: create_lfr_graph(n, seed=self.seed))
+        self._benchmark(graph_factory, 'lfr')
 
-    def _create_geometric(self, n: int) -> Graph:
-        graph = nx.generators.random_geometric_graph(
-            n, radius=self._geo_rad(n), seed=self.seed)
-        graph = filter_isolated(ig.Graph.from_networkx(graph))
-        return synthetic.IGraph(graph)
+    @abstractmethod
+    def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
+        pass
 
-    @staticmethod
-    def _geo_rad(n: int) -> float:
-        return min(1, 0.25 ** (np.log10(n) - 1))
 
-    def _create_power_law_cluster(self, n: int) -> Graph:
-        graph = nx.generators.powerlaw_cluster_graph(
-            n, m=2, p=0.95, seed=self.seed)
-        graph = filter_isolated(ig.Graph.from_networkx(graph))
-        return synthetic.IGraph(graph)
+# noinspection PyTypeChecker
+class ScalabilityExperiments(SyntheticExperiments):
+    __slots__ = ()
 
-    def _create_lfr(self, n: int) -> Graph:
-        graph = nx.generators.LFR_benchmark_graph(
-            n,
-            tau1=3,
-            tau2=2,
-            mu=0.1,
-            min_degree=3,
-            max_degree=50,
-            min_community=10,
-            max_community=100,
-            seed=self.seed)
-        # Wrap with filter_isolated() if min_degree < 2
-        return synthetic.IGraph(ig.Graph.from_networkx(graph))
+    def __init__(self, seed=None):
+        super().__init__(seed)
 
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
         workers = (1, 2, 4, 8)
@@ -137,11 +196,12 @@ class ScalabilityExperiments:
             400_000,
             800_000,
             1_000_000)
-        logger = self._configure_logger(graph)
+        logfile = self._logfile(graph, 'log')
+        logger = get_logger(SCALABILITY_DIR, logfile)
         for u in tqdm.tqdm(users):
             if u in (1_000, 20_000):
                 graph_path = os.path.join(
-                    SCALABILITY_DIR, self._filename(graph, 'graphml', u))
+                    SCALABILITY_DIR, self._logfile(graph, 'graphml', u))
             else:
                 graph_path = None
             dataset = create_synthetic_data(
@@ -159,18 +219,8 @@ class ScalabilityExperiments:
                     logger=logger)
                 risk_prop.run(dataset.scores, dataset.contacts)
 
-    def _configure_logger(self, graph: str):
-        name = self._filename(graph, 'log')
-        logger = logging.getLogger(name)
-        logger.setLevel(logging.INFO)
-        handler = logging.FileHandler(
-            filename=os.path.join(SCALABILITY_DIR, name), mode='w')
-        handler.setFormatter(logging.Formatter('%(message)s'))
-        logger.addHandler(handler)
-        return logger
-
     @staticmethod
-    def _filename(graph: str, ext: str, users: Optional[int] = None) -> str:
+    def _logfile(graph: str, ext: str, users: Optional[int] = None) -> str:
         if users is None:
             name = f'g-{graph}_{round(time.time())}.{ext}'
         else:
@@ -178,23 +228,89 @@ class ScalabilityExperiments:
         return name
 
 
-def model_object_sizes():
-    score = model.risk_score(1, 1)
-    min_geohash = model.temporal_loc('a', 1)
-    max_geohash = model.temporal_loc('abcdefghijkl', 1)
-    coord = model.temporal_loc((0, 0), 1)
-    objects = {
-        'risk score': score.nbytes,
-        'min geohash': min_geohash.nbytes,
-        'max geohash': max_geohash.nbytes,
-        'coord': coord.nbytes,
-        'contact': model.contact((0, 0), 1).nbytes,
-        'msg': model.message([], 1, 1, 1, 1).nbytes,
-        'min geohash history': model.history([min_geohash], 0).nbytes,
-        'max geohash history': model.history([max_geohash], 0).nbytes,
-        'coord history': model.history([coord], 0).nbytes,
-        'node': model.node([1], 1).nbytes}
-    pprint.pprint(objects, indent=1)
+class ParameterExperiments(SyntheticExperiments):
+    __slots__ = ('seed',)
+
+    def __init__(self, seed=None):
+        super().__init__(seed)
+
+    def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
+        transmissions = range(1, 11, 1)
+        tols = range(1, 11, 1)
+        dataset = create_synthetic_data(
+            users=10_000,
+            graph_factory=graph_factory,
+            days=15,
+            p=0.2,
+            seed=self.seed)
+        for tol, transmission in itertools.product(tols, transmissions):
+            logfile = self._logfile(graph, tol, transmission)
+            logger = get_logger(PARAMETER_DIR, logfile)
+            risk_prop = propagation.RiskPropagation(
+                tol=tol,
+                transmission=transmission,
+                workers=4,
+                timeout=5,
+                logger=logger)
+            risk_prop.run(dataset.scores, dataset.contacts)
+
+    @staticmethod
+    def _logfile(graph: str, tol: int, transmission: int) -> str:
+        return f'g-{graph}_to-{tol}_tr-{transmission}.log'
+
+
+class RealWorldExperiments:
+    __slots__ = ('seed',)
+
+    def __init__(self, seed=None):
+        self.seed = seed
+
+    def benchmark(self, setting: str, path: str) -> None:
+        if setting == 'high-school':
+            self.benchmark_high_school(path)
+        elif setting == 'conference':
+            self.benchmark_conference(path)
+        elif setting == 'workplace':
+            self.benchmark_workplace(path)
+        else:
+            raise ValueError(
+                f"'setting' must be one of ('high-school', 'conference', "
+                f"'workplace'), not {setting}")
+
+    def benchmark_high_school(self, path: str) -> None:
+        self._benchmark(setting='high-school', path=path, sep='\t')
+
+    def benchmark_conference(self, path: str) -> None:
+        self._benchmark(setting='conference', path=path, sep=' ')
+
+    def benchmark_workplace(self, path: str) -> None:
+        self._benchmark(setting='workplace', path=path, sep=' ')
+
+    def _benchmark(self, setting: str, path: str, sep: str) -> None:
+        logfile = self._logfile(setting)
+        logger = get_logger(REAL_WORLD_DIR, logfile)
+        for _ in range(10):
+            dataset = create_sociopatterns_data(
+                path=path, sep=sep, days=15, p=0.2, seed=self.seed)
+            risk_prop = propagation.RiskPropagation(
+                tol=0.3, workers=4, timeout=5, logger=logger)
+            risk_prop.run(dataset.scores, dataset.contacts)
+
+    @staticmethod
+    def _logfile(setting: str) -> str:
+        return f'{setting}.log'
+
+
+def parse_scalability_exps(args: argparse.Namespace) -> None:
+    ScalabilityExperiments(args.seed).benchmark(args.graph)
+
+
+def parse_parameter_exps(args: argparse.Namespace) -> None:
+    ParameterExperiments(args.seed).benchmark(args.graph)
+
+
+def parse_real_world_exps(args: argparse.Namespace) -> None:
+    RealWorldExperiments(args.seed).benchmark(args.setting, args.path)
 
 
 def main():
@@ -205,14 +321,22 @@ def main():
     scalability.add_argument(
         '--graph', choices=('lfr', 'power', 'geometric'), required=True)
     scalability.add_argument('--seed', type=int, default=None)
-    scalability.set_defaults(func=parse_scalability)
+    scalability.set_defaults(func=parse_scalability_exps)
+
+    parameters = subparsers.add_parser('parameters')
+    parameters.add_argument('--seed', type=int, default=None)
+    parameters.set_defaults(func=parse_parameter_exps)
+
+    real_world = subparsers.add_parser('real-world')
+    real_world.add_argument(
+        '--setting',
+        choices=('workplace', 'school', 'conference'),
+        required=True)
+    real_world.add_argument('--seed', type=int, default=None)
+    real_world.set_defaults(func=parse_real_world_exps)
 
     args = parser.parse_args()
     args.func(args)
-
-
-def parse_scalability(args: argparse.Namespace):
-    ScalabilityExperiments(args.seed).benchmark(args.graph)
 
 
 if __name__ == '__main__':
