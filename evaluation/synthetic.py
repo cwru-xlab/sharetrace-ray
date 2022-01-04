@@ -7,7 +7,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Iterable, Optional, Sequence, Tuple, Union
+from typing import Iterable, Optional, Tuple, Union
 
 import igraph as ig
 import networkx as nx
@@ -467,39 +467,24 @@ class SocioPatternsGraphReader(GraphReader):
         self.sep = sep
 
     def read(self, path: str) -> Graph:
-        times, pairs = self._parse(path)
-        idx = {n: i for i, n in enumerate(np.unique(pairs))}
-        unique = np.unique(pairs, axis=0)
-        times = self._filter_times(times, pairs, unique)
-        return self._create_graph(unique, times, idx)
-
-    def _parse(self, path: str):
         with open(path, 'r') as f:
-            parse = self._parse_line
+            sep = self.sep
             triples = np.array([
-                parse(line) for line in f.readlines()], dtype=np.int64)
-            times, pairs = triples[:, 0], triples[:, [1, 2]]
-            return times, pairs
-
-    def _parse_line(self, line: str):
-        return line.rstrip('\n').split(self.sep)[:3]
-
-    @staticmethod
-    def _filter_times(
-            times: np.ndarray,
-            pairs: np.ndarray,
-            unique: np.ndarray
-    ) -> np.ndarray:
+                line.rstrip('\n').split(sep)[:3] for line in f.readlines()],
+                dtype=np.int64)
+        times, pairs = triples[:, 0], triples[:, [1, 2]]
+        # Sort pairs to ensure that "reversed" pairs are not kept.
+        order = np.argsort(pairs, axis=1)
+        times, pairs = times[order], pairs[order]
+        unique = np.unique(pairs, axis=0)
+        idx = {n: i for i, n in enumerate(np.unique(pairs))}
         # Shift time forward to ensure positive timestamps.
         offset = round(datetime.datetime.utcnow().timestamp())
         # Use the latest time in a series of contacts as the contact time.
-        return np.array([
+        times = np.array([
             np.max(times[(pairs == p).all(1)]) + offset for p in unique])
-
-    @staticmethod
-    def _create_graph(names: Sequence, times: Sequence, idx: Sequence) -> Graph:
         graph = ig.Graph(
-            edges=[(idx[n1], idx[n2]) for n1, n2 in names],
+            edges=[(idx[n1], idx[n2]) for n1, n2 in unique],
             edge_attrs={'time': times})
         return IGraph(graph)
 
@@ -562,3 +547,7 @@ class SocioPatternsContactFactory(DataFactory):
         self.start = round(start.timestamp())
         contact = model.contact
         return np.array([contact(names, t) for names, t in graph.edges('time')])
+
+
+if __name__ == '__main__':
+    SocioPatternsGraphReader().read('data//conference.txt')
