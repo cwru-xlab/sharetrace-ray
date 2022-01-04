@@ -8,7 +8,8 @@ import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
-    Any, Hashable, Iterable, Mapping, MutableMapping, Optional, Sequence, Set,
+    Any, Collection, Hashable, Iterable, Mapping, MutableMapping, Optional,
+    Sequence, Set,
     Tuple,
     Type, Union
 )
@@ -218,7 +219,7 @@ class _Partition(Actor):
             self._stop_condition = StopCondition.TIMED_OUT.data(self.timeout)
         return self._timed_out or too_long or no_updates
 
-    def receive(self) -> Optional[np.void]:
+    def receive(self) -> Optional:
         # Prioritize local convergence over processing remote messages.
         if len((local := self._local)) > 0:
             msg = local.popleft()
@@ -227,7 +228,10 @@ class _Partition(Actor):
                 msg = self.mailbox.get(block=True, timeout=self.timeout)
             except self.empty:
                 msg, self._timed_out = None, True
-        self._msgs += msg is not None
+        if isinstance(msg, np.void):
+            self._msgs += 1
+        elif isinstance(msg, Collection):
+            self._msgs = len(msg)
         return msg
 
     def on_next(self, msg: np.void, **kwargs) -> None:
@@ -417,30 +421,38 @@ class RiskPropagation(ActorSystem):
 
     def _run(self, scores: NpSeq, contacts: Array) -> Array:
         self.log.clear()
-        timed = util.time(
-            lambda: self.create_graph(scores, contacts))
-        graph, parts, u2i, _, no_ne = timed.result
-        self._log_stats(graph, timed.seconds)
+        timed = util.time(lambda: self.create_graph(scores, contacts))
+        graph, parts, u2i, n2p, no_ne, partition_runtime = timed.result
+        build_time = timed.seconds
         self.send(parts)
         results = [a.run() for a in self.actors]
         # Compute the exposure score for those without neighbors.
         no_ne = {u2i[u]: initial(scores[u])['val'] for u in no_ne}
         results = ray.get(results)
-        self._log_workers(results)
-        self._write_log()
-        return self._gather(results, u2i, no_ne)
+        exposures = self._gather(results, u2i, no_ne)
+        # noinspection PyTypeChecker
+        self._log(
+            graph=graph,
+            build_time=build_time,
+            partition_runtime=partition_runtime,
+            results=results,
+            membership=n2p.tolist(),
+            symptoms=[float(initial(s)['val']) for s in scores],
+            exposures=exposures.tolist())
+        self._save_log()
+        return exposures
 
     def create_graph(
             self,
             scores: NpSeq,
             contacts: Array
-    ) -> Tuple[Graph, Sequence[NpMap], Index, Index, Set[int]]:
+    ) -> Tuple[Graph, Sequence[NpMap], Index, Index, Set[int], float]:
         u2i, no_ne = self._index(scores, contacts)
         graph, adjlist, n2i = self._add_factors(contacts, u2i)
-        n2p = self._add_vars(graph, adjlist, n2i)
+        n2p, partition_runtime = self._add_vars(graph, adjlist, n2i)
         self._connect(ray.put(graph))
         parts = self._group(scores, u2i, n2i, n2p, no_ne)
-        return graph, parts, u2i, n2p, no_ne
+        return graph, parts, u2i, n2p, no_ne, partition_runtime
 
     @staticmethod
     def _index(scores: NpSeq, contacts: Array) -> Tuple[Index, Set[int]]:
@@ -454,7 +466,8 @@ class RiskPropagation(ActorSystem):
     def _add_factors(
             self,
             contacts: Array,
-            u2i: Index) -> Tuple[Graph, Sequence, Index]:
+            u2i: Index
+    ) -> Tuple[Graph, Sequence, Index]:
         graph, adjlist = {}, collections.defaultdict(list)
         for contact in contacts:
             u1, u2 = contact['names']
@@ -467,13 +480,17 @@ class RiskPropagation(ActorSystem):
         self.nodes, self.edges = len(adjlist), len(graph)
         return graph, adjlist, n2i
 
-    def _add_vars(self, graph: Graph, adjlist: Sequence, n2i: Index) -> Index:
+    def _add_vars(
+            self,
+            graph: Graph,
+            adjlist: Sequence,
+            n2i: Index
+    ) -> Tuple[Index, float]:
         timed = util.time(lambda: self.partition(adjlist, n2i))
-        self.log['PartitionTimeInSeconds'] = util.approx(timed.seconds)
         n2p = timed.result
         node = model.node
         graph.update((n2i[n], node(ne, n2p[n])) for n, ne in enumerate(adjlist))
-        return n2p
+        return n2p, timed.seconds
 
     def partition(self, adjlist: Sequence, n2i: Index) -> Array:
         if self.partitioning == 'spectral':
@@ -540,21 +557,6 @@ class RiskPropagation(ActorSystem):
                 parts[i2p[i]][i] = uscores
         return parts
 
-    def _log_stats(self, graph: Graph, runtime: float) -> None:
-        approx = util.approx
-        self.log.update({
-            'GraphSizeInMb': approx(util.get_mb(graph)),
-            'GraphBuildTimeInSeconds': approx(runtime),
-            'Nodes': int(self.nodes),
-            'Edges': int(self.edges),
-            'TimeBufferInSeconds': float(self.time_buffer),
-            'Transmission': approx(self.transmission),
-            'SendTolerance': approx(self.tol),
-            'Workers': int(self.workers),
-            'TimeoutInSeconds': approx(self.timeout),
-            'MaxDurationInSeconds': approx(self.max_dur),
-            'EarlyStop': self.early_stop})
-
     @staticmethod
     def _gather(
             results: Iterable[Result],
@@ -569,11 +571,36 @@ class RiskPropagation(ActorSystem):
             result[u] = merged[i]
         return result
 
-    def _write_log(self) -> None:
-        if (logger := self.logger) is not None:
-            logger.info(json.dumps(self.log))
-
-    def _log_workers(self, results: Iterable[Result]) -> None:
+    def _log(
+            self,
+            symptoms: Sequence[float],
+            exposures: Sequence[float],
+            graph: Graph,
+            membership: Sequence[int],
+            build_time: float,
+            partition_runtime: float,
+            results: Iterable[Result]):
+        approx = util.approx
+        self.log.update({
+            'GraphSizeInMb': approx(util.get_mb(graph)),
+            'GraphBuildTimeInSeconds': approx(build_time),
+            'PartitionTimeInSeconds': approx(partition_runtime),
+            'Nodes': int(self.nodes),
+            'Edges': int(self.edges),
+            'TimeBufferInSeconds': float(self.time_buffer),
+            'Transmission': approx(self.transmission),
+            'SendTolerance': approx(self.tol),
+            'Workers': int(self.workers),
+            'TimeoutInSeconds': approx(self.timeout),
+            'MaxDurationInSeconds': approx(self.max_dur),
+            'EarlyStop': self.early_stop,
+            'Membership': membership,
+            'SymptomScores': symptoms,
+            'ExposureScores': exposures})
         logs = [r.log for r in results]
         self.log.update(WorkerLog.summarize(*logs))
         self.log['WorkerLogs'] = [log.format() for log in logs]
+
+    def _save_log(self) -> None:
+        if (logger := self.logger) is not None:
+            logger.info(json.dumps(self.log))
