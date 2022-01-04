@@ -221,9 +221,9 @@ class ScalabilityExperiments(SyntheticExperiments):
     @staticmethod
     def _logfile(graph: str, ext: str, users: Optional[int] = None) -> str:
         if users is None:
-            name = f'g-{graph}_{round(time.time())}.{ext}'
+            name = f'{graph}-{round(time.time())}.{ext}'
         else:
-            name = f'g-{graph}_u-{users}_{round(time.time())}.{ext}'
+            name = f'{graph}-{users}-{round(time.time())}.{ext}'
         return name
 
 
@@ -240,12 +240,10 @@ class ParameterExperiments(SyntheticExperiments):
             days=15,
             p=0.2,
             seed=self.seed)
-        get_logfile = self._logfile
+        logger = get_logger(PARAMETER_DIR, self._logfile(graph))
         # transmission = 1 never terminates because of no decay.
         loop = list(itertools.product(range(1, 11), range(1, 10)))
         for tol, transmission in tqdm.tqdm(loop):
-            logfile = get_logfile(graph, tol, transmission)
-            logger = get_logger(PARAMETER_DIR, logfile)
             risk_prop = propagation.RiskPropagation(
                 tol=tol / 10,
                 transmission=transmission / 10,
@@ -255,8 +253,8 @@ class ParameterExperiments(SyntheticExperiments):
             risk_prop.run(dataset.scores, dataset.contacts)
 
     @staticmethod
-    def _logfile(graph: str, tol: int, transmission: int) -> str:
-        return f'g-{graph}_to-{tol}_tr-{transmission}.log'
+    def _logfile(graph: str) -> str:
+        return f'{graph}-{round(time.time())}.log'
 
 
 class RealWorldExperiments:
@@ -303,7 +301,7 @@ class RealWorldExperiments:
 
     @staticmethod
     def _logfile(setting: str) -> str:
-        return f'{setting}.log'
+        return f'{setting}-{round(time.time())}.log'
 
 
 def parse_scalability_exps(args: argparse.Namespace) -> None:
