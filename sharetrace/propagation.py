@@ -136,7 +136,7 @@ class Partition(Actor):
         ray.get(self._actor.connect.remote(*actors, duplex=duplex))
 
 
-@ray.remote
+@ray.remote(max_retries=3, max_restarts=3)
 class _Partition(Actor):
     __slots__ = (
         'graph',
@@ -422,7 +422,7 @@ class RiskPropagation(ActorSystem):
         return result
 
     def on_start(self):
-        ray.init()
+        ray.init(ignore_reinit_error=True)
 
     def on_stop(self):
         ray.shutdown()
