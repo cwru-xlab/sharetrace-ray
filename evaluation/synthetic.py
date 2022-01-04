@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import itertools
 import os
 import random
 import warnings
@@ -467,26 +468,31 @@ class SocioPatternsGraphReader(GraphReader):
         self.sep = sep
 
     def read(self, path: str) -> Graph:
+        def by_pair(triple):
+            return triple[1:]
+
+        def by_time(triple):
+            return triple[0]
+
         with open(path, 'r') as f:
-            sep = self.sep
-            triples = np.array([
-                line.rstrip('\n').split(sep)[:3] for line in f.readlines()],
-                dtype=np.int64)
-        times, pairs = triples[:, 0], triples[:, [1, 2]]
-        # Sort pairs to ensure that "reversed" pairs are not kept.
-        order = np.argsort(pairs, axis=1)
-        times, pairs = times[order], pairs[order]
-        unique = np.unique(pairs, axis=0)
-        idx = {n: i for i, n in enumerate(np.unique(pairs))}
+            parse = self._parse_line
+            triples = sorted(
+                (parse(line) for line in f.readlines()), key=by_pair)
+        groups = itertools.groupby(triples, key=by_pair)
+        triples = [sorted(g, key=by_time)[-1] for _, g in groups]
+        names = set(itertools.chain.from_iterable(t[1:] for t in triples))
+        idx = {n: i for i, n in enumerate(names)}
         # Shift time forward to ensure positive timestamps.
         offset = round(datetime.datetime.utcnow().timestamp())
-        # Use the latest time in a series of contacts as the contact time.
-        times = np.array([
-            np.max(times[(pairs == p).all(1)]) + offset for p in unique])
-        graph = ig.Graph(
-            edges=[(idx[n1], idx[n2]) for n1, n2 in unique],
-            edge_attrs={'time': times})
+        times = [t + offset for t, _, _ in triples]
+        edges = [(idx[n1], idx[n2]) for _, n1, n2 in triples]
+        graph = ig.Graph(edges=edges, edge_attrs={'time': times})
         return IGraph(graph)
+
+    def _parse_line(self, line: str) -> Tuple[int, int, int]:
+        t, n1, n2 = line.rstrip('\n').split(self.sep)[:3]
+        t, n1, n2 = int(t), int(n1), int(n2)
+        return t, min(n1, n2), max(n1, n2)
 
 
 class SocioPatternsDatasetFactory(DataFactory):
@@ -550,4 +556,7 @@ class SocioPatternsContactFactory(DataFactory):
 
 
 if __name__ == '__main__':
-    SocioPatternsGraphReader().read('data//conference.txt')
+    SocioPatternsContactFactory(
+        path='data//conference.txt',
+        graph_path='data//conference.graphml'
+    )()
