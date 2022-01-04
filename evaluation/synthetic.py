@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import datetime
 import os
 import random
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from datetime import datetime
 from functools import lru_cache
-from typing import Iterable, Optional, Tuple, Union
+from typing import Iterable, Optional, Sequence, Tuple, Union
 
 import igraph as ig
 import networkx as nx
@@ -37,7 +37,7 @@ class DataFactory(ABC, Callable):
         super().__init__()
 
     @abstractmethod
-    def __call__(self, n: int):
+    def __call__(self, n: int, **kwargs):
         pass
 
 
@@ -53,7 +53,7 @@ class UniformBernoulliValueFactory(DataFactory):
         self.seed = seed
         self._rng = np.random.default_rng(seed)
 
-    def __call__(self, n: int) -> np.ndarray:
+    def __call__(self, n: int, **kwargs) -> np.ndarray:
         rng = self._rng
         per_user = self.per_user
         indicator = stats.bernoulli.rvs(self.p, size=n)
@@ -78,15 +78,16 @@ class TimeFactory(DataFactory):
         super().__init__()
         self.days = days
         self.per_day = per_day
-        self.now = now or datetime.utcnow().timestamp()
+        self.now = now or round(datetime.datetime.utcnow().timestamp())
         self.random_first = random_first
         self.seed = seed
         self._rng = np.random.default_rng(self.seed)
 
-    def __call__(self, n: int) -> np.ndarray:
+    def __call__(self, n: int, now: int = None, **kwargs) -> np.ndarray:
+        now = now if now is not None else self.now
         create_delta, concat = self.create_delta, np.concatenate
         offsets = np.arange(self.days) * SEC_PER_DAY
-        starts = self.now - offsets
+        starts = now - offsets
         times = np.zeros((n, self.days * self.per_day), dtype=np.int64)
         for i in range(n):
             delta = create_delta()
@@ -136,7 +137,7 @@ class LocationFactory(DataFactory):
         self.seed = seed
         self._rng = np.random.default_rng(seed)
 
-    def __call__(self, n: int) -> np.ndarray:
+    def __call__(self, n: int, **kwargs) -> np.ndarray:
         locs = np.zeros((n, 2, self.steps()))
         walk = self.walk
         for i in range(n):
@@ -291,7 +292,7 @@ class DatasetFactory(DataFactory):
         self.history_factory = history_factory
         self.contact_factory = contact_factory
 
-    def __call__(self, n: int) -> Dataset:
+    def __call__(self, n: int, **kwargs) -> Dataset:
         scores = self.score_factory(n)
         histories, contacts = None, None
         if (factory := self.history_factory) is not None:
@@ -309,8 +310,9 @@ class ScoreFactory(DataFactory):
         self.value_factory = value_factory
         self.time_factory = time_factory
 
-    def __call__(self, n: int) -> np.ndarray:
-        values, times = self.value_factory(n), self.time_factory(n)
+    def __call__(self, n: int, now: int = None, **kwargs) -> np.ndarray:
+        values = self.value_factory(n)
+        times = self.time_factory(n, now=now)
         risk_score = model.risk_score
         return np.array([
             [risk_score(v, t) for v, t in zip(vs, ts)]
@@ -325,7 +327,7 @@ class HistoryFactory(DataFactory):
         self.loc_factory = loc_factory
         self.time_factory = time_factory
 
-    def __call__(self, n: int) -> np.ndarray:
+    def __call__(self, n: int, **kwargs) -> np.ndarray:
         locations, times = self.loc_factory(n), self.time_factory(n)
         tloc, history = model.temporal_loc, model.history
         return np.array([
@@ -346,7 +348,7 @@ class ContactFactory(DataFactory):
         self.time_factory = time_factory
         self.graph_path = graph_path
 
-    def __call__(self, n: int) -> np.ndarray:
+    def __call__(self, n: int, **kwargs) -> np.ndarray:
         graph = self.graph_factory(n)
         if (path := self.graph_path) is not None:
             graph.save(path)
@@ -393,7 +395,7 @@ class GraphFactory(DataFactory):
         super().__init__()
 
     @abstractmethod
-    def __call__(self, n: int) -> Graph:
+    def __call__(self, n: int, **kwargs) -> Graph:
         pass
 
 
@@ -452,6 +454,10 @@ class IGraph(Graph):
     def save(self, path: str) -> None:
         self._graph.write(path)
 
+    def __repr__(self):
+        cls = self.__class__.__name__
+        return f'{cls}(nodes={self.num_nodes}, edges={self.num_edges})'
+
 
 class SocioPatternsGraphReader(GraphReader):
     __slots__ = ('sep',)
@@ -461,19 +467,41 @@ class SocioPatternsGraphReader(GraphReader):
         self.sep = sep
 
     def read(self, path: str) -> Graph:
+        times, pairs = self._parse(path)
+        idx = {n: i for i, n in enumerate(np.unique(pairs))}
+        unique = np.unique(pairs, axis=0)
+        times = self._filter_times(times, pairs, unique)
+        return self._create_graph(unique, times, idx)
+
+    def _parse(self, path: str):
         with open(path, 'r') as f:
+            parse = self._parse_line
             triples = np.array([
-                line.rstrip('\n').split(self.sep) for line in f.readlines()],
-                dtype=np.int64)
+                parse(line) for line in f.readlines()], dtype=np.int64)
             times, pairs = triples[:, 0], triples[:, [1, 2]]
-            idx = {n: i for i, n in enumerate(np.unique(pairs))}
-            unique = np.unique(pairs, axis=0)
-            times = np.array([
-                np.max(times[(pairs == p).all(1)]) for p in unique])
-            graph = ig.Graph(
-                edges=[(idx[n1], idx[n2]) for n1, n2 in unique],
-                edge_attrs={'time': times})
-            return IGraph(graph)
+            return times, pairs
+
+    def _parse_line(self, line: str):
+        return line.rstrip('\n').split(self.sep)[:3]
+
+    @staticmethod
+    def _filter_times(
+            times: np.ndarray,
+            pairs: np.ndarray,
+            unique: np.ndarray
+    ) -> np.ndarray:
+        # Shift time forward to ensure positive timestamps.
+        offset = round(datetime.datetime.utcnow().timestamp())
+        # Use the latest time in a series of contacts as the contact time.
+        return np.array([
+            np.max(times[(pairs == p).all(1)]) + offset for p in unique])
+
+    @staticmethod
+    def _create_graph(names: Sequence, times: Sequence, idx: Sequence) -> Graph:
+        graph = ig.Graph(
+            edges=[(idx[n1], idx[n2]) for n1, n2 in names],
+            edge_attrs={'time': times})
+        return IGraph(graph)
 
 
 class SocioPatternsDatasetFactory(DataFactory):
@@ -487,10 +515,11 @@ class SocioPatternsDatasetFactory(DataFactory):
         self.score_factory = score_factory
         self.contact_factory = contact_factory
 
-    def __call__(self, n: int = None) -> Dataset:
-        contacts = self.contact_factory(n)
-        self.score_factory.set_now(self.contact_factory.start)
-        scores = self.score_factory(self.contact_factory.nodes)
+    def __call__(self, n: int = None, **kwargs) -> Dataset:
+        contacts = self.contact_factory()
+        scores = self.score_factory(
+            self.contact_factory.nodes, now=self.contact_factory.start)
+        assert np.min(contacts['time']) - np.max(scores['time']) > 0
         return Dataset(scores=scores, contacts=contacts)
 
 
@@ -500,11 +529,8 @@ class SocioPatternsScoreFactory(ScoreFactory):
     def __init__(self, value_factory: DataFactory, time_factory: TimeFactory):
         super().__init__(value_factory, time_factory)
 
-    def __call__(self, n: int) -> np.ndarray:
-        return super().__call__(n)
-
-    def set_now(self, now: int) -> None:
-        self.time_factory.now = now
+    def __call__(self, n: int, now: int = None, **kwargs) -> np.ndarray:
+        return super().__call__(n, now=now)
 
 
 class SocioPatternsContactFactory(DataFactory):
@@ -517,8 +543,15 @@ class SocioPatternsContactFactory(DataFactory):
         self.nodes = -1
         self.start = -1
 
-    def __call__(self, n: int = None) -> np.ndarray:
+    def __call__(self, n: int = None, now: int = None, **kwargs) -> np.ndarray:
         graph = SocioPatternsGraphReader(self.sep).read(self.path)
-        self.nodes, self.start = graph.num_nodes, min(graph.edges('time'))[-1]
+        self.nodes = graph.num_nodes
+        # Raw contact times are nonzero and shifted forward from now. To
+        # ensure all risk score timestamps are prior to the first contact,
+        # we set the start time used by the time factory to be yesterday.
+        # This assumes that each user only has 1 risk score with a timestamp
+        # that ranges between the start time given here and 1 day later.
+        start = datetime.datetime.utcnow() - datetime.timedelta(days=1)
+        self.start = round(start.timestamp())
         contact = model.contact
         return np.array([contact(names, t) for names, t in graph.edges('time')])

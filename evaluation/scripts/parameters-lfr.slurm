@@ -2,7 +2,7 @@
 
 #SBATCH --time=24:00:00
 #SBATCH -p classc -A sxg125_csds438 -N 1 -n 8 --mem=16gb
-#SBATCH --job-name="scalability-power"
+#SBATCH --job-name="parameters-lfr"
 #SBATCH --mail-user=rdt46@case.edu
 #SBATCH --mail-type=ALL
 
@@ -24,4 +24,4 @@ pip install -e ~/$PACKAGE
 
 cd ~/$PACKAGE/evaluation
 
-python3 eval.py scalability --graph power --seed 12345
+python3 eval.py parameters --graph lfr --seed 12345
