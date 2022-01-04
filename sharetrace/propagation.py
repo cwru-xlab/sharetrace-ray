@@ -136,7 +136,7 @@ class Partition(Actor):
         ray.get(self._actor.connect.remote(*actors, duplex=duplex))
 
 
-@ray.remote(max_retries=3, max_restarts=3)
+@ray.remote(max_restarts=3)
 class _Partition(Actor):
     __slots__ = (
         'graph',

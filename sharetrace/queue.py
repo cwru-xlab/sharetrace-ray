@@ -93,7 +93,7 @@ class Queue(BaseQueue):
         return ray.get(self._actor.qsize.remote())
 
 
-@ray.remote(max_retries=3, max_restarts=3)
+@ray.remote(max_restarts=3)
 class _QueueActor(BaseQueue):
 
     def __init__(self, maxsize: int = 0):
