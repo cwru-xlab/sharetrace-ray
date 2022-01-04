@@ -336,7 +336,7 @@ def main():
     real_world = subparsers.add_parser('real-world')
     real_world.add_argument(
         '--setting',
-        choices=('workplace', 'high-school11', 'high-school12' 'conference'),
+        choices=('workplace', 'high-school11', 'high-school12', 'conference'),
         required=True)
     real_world.add_argument('--path', required=True)
     real_world.add_argument('--seed', type=int, default=None)
