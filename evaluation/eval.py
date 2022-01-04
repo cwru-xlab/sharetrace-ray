@@ -241,7 +241,8 @@ class ParameterExperiments(SyntheticExperiments):
             p=0.2,
             seed=self.seed)
         get_logfile = self._logfile
-        loop = list(itertools.product(range(1, 11), range(1, 11)))
+        # transmission = 1 never terminates because of no decay.
+        loop = list(itertools.product(range(1, 11), range(1, 10)))
         for tol, transmission in tqdm.tqdm(loop):
             logfile = get_logfile(graph, tol, transmission)
             logger = get_logger(PARAMETER_DIR, logfile)
