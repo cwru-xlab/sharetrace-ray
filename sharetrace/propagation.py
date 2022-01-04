@@ -34,7 +34,6 @@ Log = MutableMapping[str, Any]
 Real = (int, float)
 
 ACTOR_SYSTEM = -1
-SEC_PER_DAY = 86400
 
 
 def ckey(n1: int, n2: int) -> Tuple[int, int]:
@@ -145,8 +144,8 @@ class _Partition(Actor):
         'time_const',
         'transmission',
         'tol',
-        'empty',
         'eps',
+        'empty',
         'timeout',
         'max_dur',
         'early_stop',
@@ -179,6 +178,7 @@ class _Partition(Actor):
         self.time_const = time_const
         self.transmission = transmission
         self.tol = tol
+        self.eps = eps
         self.empty = empty
         self.timeout = timeout
         self.max_dur = max_dur
@@ -280,16 +280,17 @@ class _Partition(Actor):
             self.graph, self._nodes[var]['init_msg'], self.name, self.send,
             self.time_buffer, self.tol, self.eps, self.time_const,
             self.transmission)
-        message, clip, log, argmax = model.message, np.clip, np.log, np.argmax
+        inf, sec_per_day = np.inf, 86400
+        message, log, argmax, minimum, maximum = (
+            model.message, np.log, np.argmax, np.minimum, np.maximum)
         for f in factors:
             # Only consider scores that may have been transmitted from contact.
             ctime = graph[ckey(var, f)]
             if len(scores := scores[scores['time'] <= ctime + buffer]) > 0:
                 # Scales time deltas in partial days.
-                diff = clip((scores['time'] - ctime) / SEC_PER_DAY, -np.inf, 0)
+                diff = minimum((scores['time'] - ctime) / sec_per_day, 0)
                 # Use the log transform to avoid overflow issues.
-                val = log(eps if scores['val'] <= eps else scores['val'])
-                weighted = val + (diff / const)
+                weighted = log(maximum(scores['val'], eps)) + (diff / const)
                 score = scores[argmax(weighted)]
                 score['val'] *= transmission
                 # This is a necessary, but not sufficient, condition for the
@@ -597,6 +598,7 @@ class RiskPropagation(ActorSystem):
             'Edges': int(self.edges),
             'TimeBufferInSeconds': float(self.time_buffer),
             'Transmission': approx(self.transmission),
+            'ZeroEpsilon': self.eps,
             'SendTolerance': approx(self.tol),
             'Workers': int(self.workers),
             'TimeoutInSeconds': approx(self.timeout),
