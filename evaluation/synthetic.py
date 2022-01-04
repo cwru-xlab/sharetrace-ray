@@ -553,10 +553,3 @@ class SocioPatternsContactFactory(DataFactory):
         self.start = round(start.timestamp())
         contact = model.contact
         return np.array([contact(names, t) for names, t in graph.edges('time')])
-
-
-if __name__ == '__main__':
-    SocioPatternsContactFactory(
-        path='data//conference.txt',
-        graph_path='data//conference.graphml'
-    )()
