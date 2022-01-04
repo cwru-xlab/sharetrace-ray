@@ -1,66 +1,11 @@
 from __future__ import annotations
 
-import datetime
 import inspect
-import logging
-import os
 import sys
 import timeit
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 import numpy as np
-
-TimeDelta = Union[datetime.timedelta, np.timedelta64]
-DateTime = Union[datetime.datetime, np.datetime64]
-
-LOGS_DIR = 'logs'
-LOGGERS = (
-    'contact-search',
-    'risk-propagation:serial',
-    'risk-propagation:lewicki',
-    'risk-propagation:ray',
-    'risk-propagation:tolerance')
-
-
-def logging_config(clear=False):
-    if clear and os.path.exists(LOGS_DIR):
-        os.rmdir(LOGS_DIR)
-    if not os.path.exists(LOGS_DIR):
-        os.mkdir(LOGS_DIR)
-
-    config = {
-        'version': 1,
-        'loggers': {
-            'root': {
-                'level': logging.INFO,
-                'handlers': ['console']
-            },
-        },
-        'handlers': {
-            'console': {
-                'class': 'logging.StreamHandler',
-                'level': logging.INFO,
-                'formatter': 'default',
-                'stream': sys.stdout,
-            }
-        },
-        'formatters': {
-            'default': {
-                'format': '%(asctime)s %(levelname)s %(module)s | %(message)s'
-            }
-        }
-    }
-    for logger in LOGGERS:
-        config['loggers'][logger] = {
-            'level': logging.INFO,
-            'handlers': [logger]}
-        config['handlers'][logger] = {
-            'class': 'logging.FileHandler',
-            'level': logging.INFO,
-            'formatter': 'default',
-            'mode': 'a',
-            'filename': f'{LOGS_DIR}//{logger}.log'}
-    return config
 
 
 def time(func: Callable[[], Any]) -> Timer:

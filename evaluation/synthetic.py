@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import logging.config
 import os
 import random
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime
 from functools import lru_cache
 from typing import Iterable, Optional, Tuple, Union
@@ -14,22 +14,11 @@ import networkx as nx
 import numpy as np
 from scipy import stats
 
-from sharetrace import model, util
+from sharetrace import model
 from sharetrace.model import ArrayLike
 
-logging.config.dictConfig(util.logging_config())
-
-rng = np.random.default_rng()
 SEC_PER_DAY = 86400
 CONTACTS_FILE_FORMAT = 'data//contacts:{}.npy'
-
-
-def save_contacts(contacts, n: int):
-    save_data(CONTACTS_FILE_FORMAT.format(n), contacts)
-
-
-def load_contacts(n: int):
-    return load(CONTACTS_FILE_FORMAT.format(n))
 
 
 def save_data(file, arr: np.ndarray):
@@ -41,7 +30,7 @@ def load(filename):
     return np.load(filename, allow_pickle=True)
 
 
-class DataFactory(ABC):
+class DataFactory(ABC, Callable):
     __slots__ = ()
 
     def __init__(self):
@@ -53,16 +42,19 @@ class DataFactory(ABC):
 
 
 class UniformBernoulliValueFactory(DataFactory):
-    __slots__ = ('per_user', 'p')
+    __slots__ = ('per_user', 'p', 'seed', '_rng')
 
-    def __init__(self, per_user: float = 15, p: float = 0.5):
+    def __init__(self, per_user: float = 15, p: float = 0.5, seed=None):
         assert 0 <= p <= 1
         assert per_user > 0
         super().__init__()
         self.per_user = per_user
         self.p = p
+        self.seed = seed
+        self._rng = np.random.default_rng(seed)
 
-    def __call__(self, n: int):
+    def __call__(self, n: int) -> np.ndarray:
+        rng = self._rng
         per_user = self.per_user
         indicator = stats.bernoulli.rvs(self.p, size=n)
         replace = np.flatnonzero(indicator)
@@ -72,14 +64,15 @@ class UniformBernoulliValueFactory(DataFactory):
 
 
 class TimeFactory(DataFactory):
-    __slots__ = ('days', 'per_day', 'now', 'random_first')
+    __slots__ = ('days', 'per_day', 'now', 'random_first', 'seed', '_rng')
 
     def __init__(
             self,
             days: int = 15,
             per_day: int = 16,
             now: Optional[int] = None,
-            random_first: bool = False):
+            random_first: bool = False,
+            seed=None):
         assert days > 0
         assert per_day > 0
         super().__init__()
@@ -87,6 +80,8 @@ class TimeFactory(DataFactory):
         self.per_day = per_day
         self.now = now or datetime.utcnow().timestamp()
         self.random_first = random_first
+        self.seed = seed
+        self._rng = np.random.default_rng(self.seed)
 
     def __call__(self, n: int) -> np.ndarray:
         create_delta, concat = self.create_delta, np.concatenate
@@ -97,12 +92,13 @@ class TimeFactory(DataFactory):
             delta = create_delta()
             times[i, :] = concat([start + delta for start in starts])
         if self.random_first:
-            rng.shuffle(times, axis=1)
+            self._rng.shuffle(times, axis=1)
             times = times[:, 0]
         return times
 
     def create_delta(self) -> np.ndarray:
-        deltas = rng.uniform(0, SEC_PER_DAY / self.per_day, size=self.per_day)
+        deltas = self._rng.uniform(
+            0, SEC_PER_DAY / self.per_day, size=self.per_day)
         return deltas.cumsum()
 
 
@@ -113,7 +109,9 @@ class LocationFactory(DataFactory):
         'low',
         'high',
         'step_low',
-        'step_high')
+        'step_high',
+        'seed',
+        '_rng')
 
     def __init__(
             self,
@@ -122,7 +120,8 @@ class LocationFactory(DataFactory):
             low: float = -1,
             high: float = 1,
             step_low: float = -0.01,
-            step_high: float = 0.01):
+            step_high: float = 0.01,
+            seed=None):
         assert days > 0
         assert per_day > 0
         assert low < high
@@ -134,6 +133,8 @@ class LocationFactory(DataFactory):
         self.high = high
         self.step_low = step_low
         self.step_high = step_high
+        self.seed = seed
+        self._rng = np.random.default_rng(seed)
 
     def __call__(self, n: int) -> np.ndarray:
         locs = np.zeros((n, 2, self.steps()))
@@ -162,7 +163,7 @@ class LocationFactory(DataFactory):
 
     def delta(self) -> np.ndarray:
         steps = self.steps()
-        return rng.uniform(self.step_low, self.step_high, size=(2, steps))
+        return self._rng.uniform(self.step_low, self.step_high, size=(2, steps))
 
 
 class GaussianMixture:
@@ -333,19 +334,27 @@ class HistoryFactory(DataFactory):
 
 
 class ContactFactory(DataFactory):
-    __slots__ = ('graph_factory', 'time_factory')
+    __slots__ = ('graph_factory', 'time_factory', 'graph_path')
 
-    def __init__(self, graph_factory: DataFactory, time_factory: DataFactory):
+    def __init__(
+            self,
+            graph_factory: DataFactory,
+            time_factory: DataFactory,
+            graph_path: Optional[str] = None):
         super().__init__()
         self.graph_factory = graph_factory
         self.time_factory = time_factory
+        self.graph_path = graph_path
 
     def __call__(self, n: int) -> np.ndarray:
         graph = self.graph_factory(n)
-        times = self.time_factory(graph.num_edges)
+        if (path := self.graph_path) is not None:
+            graph.save(path)
+        ts = self.time_factory(graph.num_edges)
         contact = model.contact
-        edges = graph.edges()
-        return np.array([contact(names, t) for names, t in zip(edges, times)])
+        es = graph.edges()
+        return np.array([
+            contact((n1, n2), t) for (n1, n2), t in zip(es, ts) if n1 != n2])
 
 
 class Graph(ABC):
@@ -370,6 +379,10 @@ class Graph(ABC):
 
     @abstractmethod
     def edges(self, *args) -> Iterable[Tuple]:
+        pass
+
+    @abstractmethod
+    def save(self, path: str) -> None:
         pass
 
 
@@ -435,6 +448,9 @@ class IGraph(Graph):
         else:
             edges = (e.tuple for e in edges)
         return edges
+
+    def save(self, path: str) -> None:
+        self._graph.write(path)
 
 
 class SocioPatternsGraphReader(GraphReader):
