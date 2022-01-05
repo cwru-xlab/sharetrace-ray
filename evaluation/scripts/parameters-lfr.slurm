@@ -25,3 +25,6 @@ pip install -e ~/$PACKAGE
 cd ~/$PACKAGE/evaluation
 
 python3 eval.py parameters --graph lfr --seed 12345
+
+cp -ru * $SLURM_SUBMIT_DIR
+rm -rf "$PFSDIR"/*

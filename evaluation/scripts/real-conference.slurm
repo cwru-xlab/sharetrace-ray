@@ -26,3 +26,6 @@ cd ~/$PACKAGE/evaluation
 
 python3 eval.py real-world \
     --setting conference --path data/conference.txt --seed 12345
+
+cp -ru * $SLURM_SUBMIT_DIR
+rm -rf "$PFSDIR"/*
