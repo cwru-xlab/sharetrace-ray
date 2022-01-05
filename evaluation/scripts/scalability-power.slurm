@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --time=24:00:00
-#SBATCH -p classc -A sxg125_csds438 -N 1 -n 8 --mem=16gb
+#SBATCH -p classc -A sxg125_csds438 -N 1 -n 8 --mem=32gb
 #SBATCH --job-name="scalability-power"
 #SBATCH --mail-user=rdt46@case.edu
 #SBATCH --mail-type=ALL
