@@ -15,9 +15,9 @@ def risk_score(val: float, time: int) -> np.void:
         time: A 64-bit integer timestamp.
 
     Returns:
-        A structured array with attributes 'val' and 'time'.
+        A structured array with attributes "val" and "time".
     """
-    dt = [('val', np.float64), ('time', np.int64)]
+    dt = [("val", np.float64), ("time", np.int64)]
     return np.array([(val, time)], dtype=dt)[0]
 
 
@@ -37,27 +37,27 @@ def temporal_loc(loc: Union[str, LatLong], time: int) -> np.void:
             time: A 64-bit integer timestamp.
 
         Returns:
-            A structured array with attributes 'time' and 'loc'.
+            A structured array with attributes "time" and "loc".
         """
     if isinstance(loc, str):
-        dt = [('loc', f'<U{len(loc)}'), ('time', np.int64)]
+        dt = [("loc", f"<U{len(loc)}"), ("time", np.int64)]
     else:
-        dt = [('loc', np.float64, (2,)), ('time', np.int64)]
+        dt = [("loc", np.float64, (2,)), ("time", np.int64)]
     return np.array([(loc, time)], dtype=dt)[0]
 
 
 def to_geohash(coord: np.void, prec: int = 12) -> np.void:
     """Converts the coordinates of the temporal location into a geohash."""
-    lat, long = coord['loc']
+    lat, long = coord["loc"]
     geohash = pygeohash.encode(lat, long, prec)
-    return temporal_loc(geohash, coord['time'])
+    return temporal_loc(geohash, coord["time"])
 
 
 def to_geohashes(*hists: np.void, prec: int = 12) -> Union[np.void, Sequence]:
     """Converts the coordinates of the location history into geohashes."""
     assert 0 < prec < 13
     converted = [
-        history([to_geohash(loc, prec) for loc in hist['locs']], hist['name'])
+        history([to_geohash(loc, prec) for loc in hist["locs"]], hist["name"])
         for hist in hists]
     if len(hists) == 1:
         converted = converted[0]
@@ -66,14 +66,14 @@ def to_geohashes(*hists: np.void, prec: int = 12) -> Union[np.void, Sequence]:
 
 def to_coords(hist: np.void) -> np.void:
     """Converts the geohashes of the location history into coordinates."""
-    coords = [to_coord(geohash) for geohash in hist['locs']]
-    return history(coords, hist['name'])
+    coords = [to_coord(geohash) for geohash in hist["locs"]]
+    return history(coords, hist["name"])
 
 
 def to_coord(geohash: np.void) -> np.void:
     """Converts the geohash of the temporal location into coordinates."""
-    lat, long = pygeohash.decode(geohash['loc'])
-    return temporal_loc((lat, long), geohash['time'])
+    lat, long = pygeohash.decode(geohash["loc"])
+    return temporal_loc((lat, long), geohash["time"])
 
 
 def contact(names: ArrayLike, time: int) -> np.void:
@@ -84,10 +84,10 @@ def contact(names: ArrayLike, time: int) -> np.void:
         time: A 64-bit integer timestamp.
 
     Returns:
-        A structured array with attributes 'names' and 'time'.
+        A structured array with attributes "names" and "time".
     """
     names = np.array(names)
-    dt = [('names', names.dtype, names.shape), ('time', np.int64)]
+    dt = [("names", names.dtype, names.shape), ("time", np.int64)]
     return np.array([(names, time)], dtype=dt)[0]
 
 
@@ -99,10 +99,10 @@ def history(locs: ArrayLike, name: int) -> np.void:
         name: A 64-bit int that labels the history.
 
     Returns:
-        A structured array with attributes 'name' and 'locs'.
+        A structured array with attributes "name" and "locs".
     """
-    locs = np.sort(locs, order=('time', 'loc'), kind='stable')
-    dt = [('locs', locs.dtype, locs.shape), ('name', np.int64)]
+    locs = np.sort(locs, order=("time", "loc"), kind="stable")
+    dt = [("locs", locs.dtype, locs.shape), ("name", np.int64)]
     return np.array([(locs, name)], dtype=dt)[0]
 
 
@@ -122,15 +122,15 @@ def message(
         dgroup: An 8-bit int that represents the group of the destination.
 
     Returns:
-       An array with attributes 'val', 'src', 'sgroup', 'dest', and 'dgroup'.
+       An array with attributes "val", "src", "sgroup", "dest", and "dgroup".
     """
     val = np.array(val)
     dt = [
-        ('val', val.dtype, val.shape),
-        ('src', np.int64),
-        ('sgroup', np.int8),
-        ('dest', np.int64),
-        ('dgroup', np.int8)]
+        ("val", val.dtype, val.shape),
+        ("src", np.int64),
+        ("sgroup", np.int8),
+        ("dest", np.int64),
+        ("dgroup", np.int8)]
     return np.array([(val, src, sgroup, dest, dgroup)], dtype=dt)[0]
 
 
@@ -142,8 +142,8 @@ def node(ne: ArrayLike, group: int) -> np.void:
         group: An 8-bit int that indicates the graph partition.
 
     Returns:
-        A numpy structured array with attributes 'ne' and 'group'.
+        A numpy structured array with attributes "ne" and "group".
     """
     ne = np.array(ne)
-    dt = [('ne', ne.dtype, ne.shape), ('group', np.int8)]
+    dt = [("ne", ne.dtype, ne.shape), ("group", np.int8)]
     return np.array([(ne, group)], dtype=dt)[0]

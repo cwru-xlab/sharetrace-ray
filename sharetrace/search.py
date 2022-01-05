@@ -20,13 +20,13 @@ _EARTH_RADIUS_METERS = 6378137
 class ContactSearch:
     """Algorithm for finding contacts in trajectories using a ball tree."""
     __slots__ = (
-        'min_dur',
-        'r',
-        'leaf_size',
-        'tol',
-        'workers',
-        'verbose',
-        'logger')
+        "min_dur",
+        "r",
+        "leaf_size",
+        "tol",
+        "workers",
+        "verbose",
+        "logger")
 
     def __init__(
             self,
@@ -69,10 +69,10 @@ class ContactSearch:
 
     def _search(self, histories: Histories) -> Arrays:
         pairs, locs = self.select(histories)
-        # For loky backend, use batch_size = 500; 'auto' is slow.
-        # No difference in speed between 'threads' and 'processes' backend.
+        # For loky backend, use batch_size = 500; "auto" is slow.
+        # No difference in speed between "threads" and "processes" backend.
         par = joblib.Parallel(
-            self.workers, prefer='threads', verbose=self.verbose)
+            self.workers, prefer="threads", verbose=self.verbose)
         find_contact = joblib.delayed(self.find_contact)
         # Memmapping the arguments does not result in a speedup.
         contacts = par(find_contact(p, histories, locs) for p in pairs)
@@ -81,7 +81,7 @@ class ContactSearch:
     def select(self, histories: Histories) -> Tuple:
         """Returns the unique user pairs and grouped Cartesian coordinates."""
         points, pidx = flatten([to_latlongs(h) for h in histories])
-        tree = neighbors.BallTree(points, self.leaf_size, metric='haversine')
+        tree = neighbors.BallTree(points, self.leaf_size, metric="haversine")
         queried, qidx = flatten(
             tree.query_radius(points, self.r / _EARTH_RADIUS_METERS))
         # Sorting along the last axis ensures duplicate pairs are removed.
@@ -101,15 +101,15 @@ class ContactSearch:
     ) -> Optional[np.void]:
         u1, u2 = pair
         hist1, hist2 = histories[u1], histories[u2]
-        times1, locs1 = resample(hist1['locs']['time'], locs[u1])
-        times2, locs2 = resample(hist2['locs']['time'], locs[u2])
+        times1, locs1 = resample(hist1["locs"]["time"], locs[u1])
+        times2, locs2 = resample(hist2["locs"]["time"], locs[u2])
         times1, locs1, times2, locs2 = pad(times1, locs1, times2, locs2)
         contact = None
         if len(close := self.proximal(locs1, locs2)) > 0:
             ints = get_intervals(close)
             durations = ints[:, 1] - ints[:, 0]
             if len(options := np.flatnonzero(durations >= self.min_dur)) > 0:
-                names = (hist1['name'], hist2['name'])
+                names = (hist1["name"], hist2["name"])
                 start, _ = ints[options[-1]]
                 contact = model.contact(names, times1[start])
         return contact
@@ -123,19 +123,19 @@ class ContactSearch:
     def log(self, inputs: int, contacts: int, runtime: float) -> None:
         if self.logger is not None:
             self.logger.info(json.dumps({
-                'RuntimeInSeconds': util.approx(runtime),
-                'Workers': self.workers,
-                'MinDurationInSeconds': self.min_dur,
-                'Inputs': inputs,
-                'Contacts': contacts,
-                'LeafSize': self.leaf_size,
-                'RadiusInMeters': self.r,
-                'ToleranceInMeters': self.tol}))
+                "RuntimeInSeconds": util.approx(runtime),
+                "Workers": self.workers,
+                "MinDurationInSeconds": self.min_dur,
+                "Inputs": inputs,
+                "Contacts": contacts,
+                "LeafSize": self.leaf_size,
+                "RadiusInMeters": self.r,
+                "ToleranceInMeters": self.tol}))
 
 
 def to_latlongs(history: np.void) -> Array:
     """Maps a location history to radian lat-long coordinate pairs."""
-    return np.radians(model.to_coords(history)['locs']['loc'])
+    return np.radians(model.to_coords(history)["locs"]["loc"])
 
 
 def flatten(arrays: Arrays) -> Arrays:
@@ -154,12 +154,12 @@ def get_intervals(a: Array) -> Array:
 def resample(times: Array, locs: Array) -> Arrays:
     """Resamples the times and locations to be at the minute-resolution."""
     # Second resolution results in really slow performance.
-    times = np.int64(times.astype('datetime64[m]'))
-    # Prefer interp1d over np.interp to use 'previous' interpolation.
+    times = np.int64(times.astype("datetime64[m]"))
+    # Prefer interp1d over np.interp to use "previous" interpolation.
     # Use the transpose of locs so its shape is (2, n_samples), where each
     # row is latitude and longitude.
     interp = interpolate.interp1d(
-        times, locs.T, kind='previous', assume_sorted=True)
+        times, locs.T, kind="previous", assume_sorted=True)
     new_times = np.arange(times[0], times[-1])
     new_locs = interp(new_times)
     return new_times, new_locs

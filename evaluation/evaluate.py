@@ -21,32 +21,32 @@ from synthetic import (ContactFactory, DataFactory, Dataset, DatasetFactory,
                        SocioPatternsDatasetFactory, SocioPatternsScoreFactory,
                        TimeFactory, UniformBernoulliValueFactory)
 
-SCALABILITY_DIR = './/logs//scalability'
+SCALABILITY_DIR = ".//logs//scalability"
 pathlib.Path(SCALABILITY_DIR).mkdir(parents=True, exist_ok=True)
 
-PARAMS_DIR = './/logs//parameters'
+PARAMS_DIR = ".//logs//parameters"
 pathlib.Path(PARAMS_DIR).mkdir(parents=True, exist_ok=True)
 
-REAL_WORLD_DIR = './/logs//real-world'
+REAL_WORLD_DIR = ".//logs//real-world"
 pathlib.Path(REAL_WORLD_DIR).mkdir(parents=True, exist_ok=True)
 
 
 def model_object_sizes():
     score = model.risk_score(1, 1)
-    min_geohash = model.temporal_loc('a', 1)
-    max_geohash = model.temporal_loc('abcdefghijkl', 1)
+    min_geohash = model.temporal_loc("a", 1)
+    max_geohash = model.temporal_loc("abcdefghijkl", 1)
     coord = model.temporal_loc((0, 0), 1)
     objects = {
-        'risk score': score.nbytes,
-        'min geohash': min_geohash.nbytes,
-        'max geohash': max_geohash.nbytes,
-        'coord': coord.nbytes,
-        'contact': model.contact((0, 0), 1).nbytes,
-        'msg': model.message([], 1, 1, 1, 1).nbytes,
-        'min geohash history': model.history([min_geohash], 0).nbytes,
-        'max geohash history': model.history([max_geohash], 0).nbytes,
-        'coord history': model.history([coord], 0).nbytes,
-        'node': model.node([1], 1).nbytes}
+        "risk score": score.nbytes,
+        "min geohash": min_geohash.nbytes,
+        "max geohash": max_geohash.nbytes,
+        "coord": coord.nbytes,
+        "contact": model.contact((0, 0), 1).nbytes,
+        "msg": model.message([], 1, 1, 1, 1).nbytes,
+        "min geohash history": model.history([min_geohash], 0).nbytes,
+        "max geohash history": model.history([max_geohash], 0).nbytes,
+        "coord history": model.history([coord], 0).nbytes,
+        "node": model.node([1], 1).nbytes}
     pprint.pprint(objects, indent=1)
 
 
@@ -56,7 +56,7 @@ def filter_isolated(g: ig.Graph) -> ig.Graph:
 
 def create_sociopatterns_data(
         path: str,
-        sep: str = ' ',
+        sep: str = " ",
         p: float = 0.2,
         graph_path: Optional[str] = None,
         seed=None
@@ -129,26 +129,26 @@ def get_logger(directory: str, logfile: str) -> logging.Logger:
     logger = logging.getLogger(logfile)
     logger.setLevel(logging.INFO)
     handler = logging.FileHandler(
-        filename=os.path.join(directory, logfile), mode='w')
-    handler.setFormatter(logging.Formatter('%(message)s'))
+        filename=os.path.join(directory, logfile), mode="w")
+    handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
     return logger
 
 
 # noinspection PyTypeChecker
 class SyntheticExperiments(ABC):
-    __slots__ = ('seed',)
+    __slots__ = ("seed",)
 
     def __init__(self, seed=None):
         super().__init__()
         self.seed = seed
 
     def benchmark(self, graph: str):
-        if graph == 'geometric':
+        if graph == "geometric":
             self.benchmark_geometric()
-        elif graph == 'power':
+        elif graph == "power":
             self.benchmark_power_law_cluster()
-        elif graph == 'lfr':
+        elif graph == "lfr":
             self.benchmark_lfr()
         else:
             raise ValueError(
@@ -158,17 +158,17 @@ class SyntheticExperiments(ABC):
     def benchmark_geometric(self) -> None:
         graph_factory = functools.partial(
             lambda n: create_geometric_graph(n, seed=self.seed))
-        self._benchmark(graph_factory, 'geometric')
+        self._benchmark(graph_factory, "geometric")
 
     def benchmark_power_law_cluster(self) -> None:
         graph_factory = functools.partial(
             lambda n: create_power_law_cluster_graph(n, seed=self.seed))
-        self._benchmark(graph_factory, 'power')
+        self._benchmark(graph_factory, "power")
 
     def benchmark_lfr(self) -> None:
         graph_factory = functools.partial(
             lambda n: create_lfr_graph(n, seed=self.seed))
-        self._benchmark(graph_factory, 'lfr')
+        self._benchmark(graph_factory, "lfr")
 
     @abstractmethod
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
@@ -184,14 +184,14 @@ class ScalabilityExperiments(SyntheticExperiments):
 
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
         get_logfile, seed = self._logfile, self.seed
-        logger = get_logger(SCALABILITY_DIR, get_logfile(graph, 'log'))
+        logger = get_logger(SCALABILITY_DIR, get_logfile(graph, "log"))
         multiples = np.arange(2, 12, 2)
         users = np.concatenate([(10 ** p) * multiples for p in range(2, 5)])
         get_workers = self._workers
         for u in tqdm.tqdm(users):
             if u in (200, 2_000, 20_000):
                 graph_path = os.path.join(
-                    SCALABILITY_DIR, get_logfile(graph, 'graphml', u))
+                    SCALABILITY_DIR, get_logfile(graph, "graphml", u))
             else:
                 graph_path = None
             dataset = create_synthetic_data(
@@ -222,20 +222,20 @@ class ScalabilityExperiments(SyntheticExperiments):
     @staticmethod
     def _logfile(graph: str, ext: str, users: Optional[int] = None) -> str:
         if users is None:
-            name = f'{graph}-{round(time.time())}.{ext}'
+            name = f"{graph}-{round(time.time())}.{ext}"
         else:
-            name = f'{graph}-{users}-{round(time.time())}.{ext}'
+            name = f"{graph}-{users}-{round(time.time())}.{ext}"
         return name
 
 
 class ParameterExperiments(SyntheticExperiments):
-    __slots__ = ('seed',)
+    __slots__ = ("seed",)
 
     def __init__(self, seed=None):
         super().__init__(seed)
 
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
-        graph_path = os.path.join(PARAMS_DIR, self._logfile(graph, 'graphml'))
+        graph_path = os.path.join(PARAMS_DIR, self._logfile(graph, "graphml"))
         dataset = create_synthetic_data(
             users=10_000,
             graph_factory=graph_factory,
@@ -243,7 +243,7 @@ class ParameterExperiments(SyntheticExperiments):
             p=0.2,
             graph_path=graph_path,
             seed=self.seed)
-        logger = get_logger(PARAMS_DIR, self._logfile(graph, 'log'))
+        logger = get_logger(PARAMS_DIR, self._logfile(graph, "log"))
         # transmission = 1 never terminates because of no decay.
         loop = list(itertools.product(range(1, 11), range(1, 10)))
         for tol, transmission in tqdm.tqdm(loop):
@@ -257,23 +257,23 @@ class ParameterExperiments(SyntheticExperiments):
 
     @staticmethod
     def _logfile(graph: str, ext: str) -> str:
-        return f'{graph}-{round(time.time())}.{ext}'
+        return f"{graph}-{round(time.time())}.{ext}"
 
 
 class RealWorldExperiments:
-    __slots__ = ('seed',)
+    __slots__ = ("seed",)
 
     def __init__(self, seed=None):
         self.seed = seed
 
     def benchmark(self, setting: str, path: str) -> None:
-        if setting == 'highschool11':
+        if setting == "highschool11":
             self.benchmark_high_school11(path)
-        elif setting == 'highschool12':
+        elif setting == "highschool12":
             self.benchmark_high_school12(path)
-        elif setting == 'conference':
+        elif setting == "conference":
             self.benchmark_conference(path)
-        elif setting == 'workplace':
+        elif setting == "workplace":
             self.benchmark_workplace(path)
         else:
             raise ValueError(
@@ -281,25 +281,25 @@ class RealWorldExperiments:
                 f"'conference', 'workplace'), not {setting}")
 
     def benchmark_high_school11(self, path: str) -> None:
-        self._benchmark(setting='highschool11', path=path, sep='\t')
+        self._benchmark(setting="highschool11", path=path, sep="\t")
 
     def benchmark_high_school12(self, path: str) -> None:
-        self._benchmark(setting='highschool12', path=path, sep='\t')
+        self._benchmark(setting="highschool12", path=path, sep="\t")
 
     def benchmark_conference(self, path: str) -> None:
-        self._benchmark(setting='conference', path=path, sep=' ')
+        self._benchmark(setting="conference", path=path, sep=" ")
 
     def benchmark_workplace(self, path: str) -> None:
-        self._benchmark(setting='workplace', path=path, sep=' ')
+        self._benchmark(setting="workplace", path=path, sep=" ")
 
     def _benchmark(self, setting: str, path: str, sep: str) -> None:
         get_logfile = self._logfile
-        logger = get_logger(REAL_WORLD_DIR, get_logfile(setting, 'log'))
+        logger = get_logger(REAL_WORLD_DIR, get_logfile(setting, "log"))
         seed = self.seed
         for i in tqdm.trange(10):
             if i == 0:
                 graph_path = os.path.join(
-                    REAL_WORLD_DIR, get_logfile(setting, 'graphml'))
+                    REAL_WORLD_DIR, get_logfile(setting, "graphml"))
             else:
                 graph_path = None
             dataset = create_sociopatterns_data(
@@ -310,7 +310,7 @@ class RealWorldExperiments:
 
     @staticmethod
     def _logfile(setting: str, ext: str) -> str:
-        return f'{setting}-{round(time.time())}.{ext}'
+        return f"{setting}-{round(time.time())}.{ext}"
 
 
 def parse_scalability_exps(args: argparse.Namespace) -> None:
@@ -329,30 +329,30 @@ def main():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
 
-    scalability = subparsers.add_parser('scalability')
+    scalability = subparsers.add_parser("scalability")
     scalability.add_argument(
-        '--graph', choices=('lfr', 'power', 'geometric'), required=True)
-    scalability.add_argument('--seed', type=int, default=None)
+        "--graph", choices=("lfr", "power", "geometric"), required=True)
+    scalability.add_argument("--seed", type=int, default=None)
     scalability.set_defaults(func=parse_scalability_exps)
 
-    parameters = subparsers.add_parser('parameters')
+    parameters = subparsers.add_parser("parameters")
     parameters.add_argument(
-        '--graph', choices=('lfr', 'power', 'geometric'), required=True)
-    parameters.add_argument('--seed', type=int, default=None)
+        "--graph", choices=("lfr", "power", "geometric"), required=True)
+    parameters.add_argument("--seed", type=int, default=None)
     parameters.set_defaults(func=parse_parameter_exps)
 
-    real_world = subparsers.add_parser('real-world')
+    real_world = subparsers.add_parser("real-world")
     real_world.add_argument(
-        '--setting',
-        choices=('workplace', 'highschool11', 'highschool12', 'conference'),
+        "--setting",
+        choices=("workplace", "highschool11", "highschool12", "conference"),
         required=True)
-    real_world.add_argument('--path', required=True)
-    real_world.add_argument('--seed', type=int, default=None)
+    real_world.add_argument("--path", required=True)
+    real_world.add_argument("--seed", type=int, default=None)
     real_world.set_defaults(func=parse_real_world_exps)
 
     args = parser.parse_args()
     args.func(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

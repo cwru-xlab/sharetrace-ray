@@ -11,7 +11,7 @@ class Actor:
         mailbox: A buffer that stores messages received from other actors.
         neighbors: A mapping from actor names to their inboxes.
     """
-    __slots__ = ('name', 'mailbox', 'neighbors')
+    __slots__ = ("name", "mailbox", "neighbors")
 
     def __init__(self, name: Hashable, mailbox=None, **kwargs):
         self.name = name
@@ -52,7 +52,7 @@ class Actor:
             pop(a.name, None)
 
     def __repr__(self):
-        return f'{self.__class__.__name__}(name={self.name})'
+        return f"{self.__class__.__name__}(name={self.name})"
 
     def __hash__(self) -> int:
         return hash(self.name)
@@ -68,7 +68,7 @@ class ActorSystem(Actor):
             actors: A collection of actors in the system.
     """
 
-    __slots__ = ('actors',)
+    __slots__ = ("actors",)
 
     def __init__(self, name: Hashable, mailbox=None, **kwargs):
         super().__init__(name, mailbox, **kwargs)
@@ -93,8 +93,8 @@ class ActorSystem(Actor):
                 add(a2)
             else:
                 raise TypeError(
-                    f'Input must be an Actor or a pair of Actors; got {a}')
+                    f"Input must be an Actor or a pair of Actors; got {a}")
 
     def __repr__(self):
         cls = self.__class__.__name__
-        return f'{cls}(name={self.name}, actors={len(self.actors)})'
+        return f"{cls}(name={self.name}, actors={len(self.actors)})"

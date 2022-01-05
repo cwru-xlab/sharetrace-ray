@@ -17,7 +17,7 @@ class BaseQueue(ABC):
             bounded by the amount of system memory.
     """
 
-    __slots__ = ('maxsize',)
+    __slots__ = ("maxsize",)
 
     def __init__(self, maxsize: int = 0):
         self.maxsize = maxsize
@@ -56,7 +56,7 @@ class BaseQueue(ABC):
         pass
 
     def __repr__(self):
-        return f'{self.__class__.__name__}(maxsize={self.maxsize})'
+        return f"{self.__class__.__name__}(maxsize={self.maxsize})"
 
 
 class Queue(BaseQueue):

@@ -13,7 +13,7 @@ def time(func: Callable[[], Any]) -> Timer:
 
 
 class Timer:
-    __slots__ = ('result', 'seconds')
+    __slots__ = ("result", "seconds")
 
     def __init__(self, result: Any, seconds: float):
         self.result = result
@@ -48,10 +48,10 @@ def get_bytes(obj, seen=None):
     if obj_id in seen:
         return 0
     seen.add(obj_id)
-    if hasattr(obj, '__dict__'):
+    if hasattr(obj, "__dict__"):
         for cls in obj.__class__.__mro__:
-            if '__dict__' in cls.__dict__:
-                d = cls.__dict__['__dict__']
+            if "__dict__" in cls.__dict__:
+                d = cls.__dict__["__dict__"]
                 gs_descriptor = inspect.isgetsetdescriptor(d)
                 m_descriptor = inspect.ismemberdescriptor(d)
                 if gs_descriptor or m_descriptor:
@@ -61,9 +61,9 @@ def get_bytes(obj, seen=None):
     if isinstance(obj, dict):
         size += sum((get_bytes(v, seen) for v in obj.values()))
         size += sum((get_bytes(k, seen) for k in obj.keys()))
-    elif hasattr(obj, '__iter__') and not any_str:
+    elif hasattr(obj, "__iter__") and not any_str:
         size += sum((get_bytes(i, seen) for i in obj))
-    if hasattr(obj, '__slots__'):
+    if hasattr(obj, "__slots__"):
         size += sum(
             get_bytes(getattr(obj, s), seen)
             for s in obj.__slots__
