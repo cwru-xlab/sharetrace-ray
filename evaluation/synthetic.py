@@ -475,10 +475,9 @@ class SocioPatternsGraphReader(GraphReader):
             return triple[0]
 
         with open(path, 'r') as f:
-            parse = self._parse_line
-            triples = sorted(
-                (parse(line) for line in f.readlines()), key=by_pair)
+            triples = sorted(map(self._parse, f.readlines()), key=by_pair)
         groups = itertools.groupby(triples, key=by_pair)
+        # Use the most recent time as the time of contact.
         triples = [sorted(g, key=by_time)[-1] for _, g in groups]
         names = set(itertools.chain.from_iterable(t[1:] for t in triples))
         idx = {n: i for i, n in enumerate(names)}
@@ -489,7 +488,7 @@ class SocioPatternsGraphReader(GraphReader):
         graph = ig.Graph(edges=edges, edge_attrs={'time': times})
         return IGraph(graph)
 
-    def _parse_line(self, line: str) -> Tuple[int, int, int]:
+    def _parse(self, line: str) -> Tuple[int, int, int]:
         t, n1, n2 = line.rstrip('\n').split(self.sep)[:3]
         t, n1, n2 = int(t), int(n1), int(n2)
         return t, min(n1, n2), max(n1, n2)
