@@ -183,24 +183,13 @@ class ScalabilityExperiments(SyntheticExperiments):
         super().__init__(seed)
 
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
-        workers = (1, 2, 4, 8)
-        users = (
-            200,
-            400,
-            800,
-            1_000,
-            20_000,
-            40_000,
-            80_000,
-            100_000,
-            200_000,
-            400_000,
-            800_000,
-            1_000_000)
         get_logfile, seed = self._logfile, self.seed
         logger = get_logger(SCALABILITY_DIR, get_logfile(graph, 'log'))
+        multiples = np.arange(2, 12, 2)
+        users = np.concatenate([(10 ** p) * multiples for p in range(2, 5)])
+        get_workers = self._workers
         for u in tqdm.tqdm(users):
-            if u in (1_000, 20_000):
+            if u in (200, 2_000, 20_000):
                 graph_path = os.path.join(
                     SCALABILITY_DIR, get_logfile(graph, 'graphml', u))
             else:
@@ -212,13 +201,23 @@ class ScalabilityExperiments(SyntheticExperiments):
                 days=15,
                 p=0.2,
                 seed=seed)
-            for w in workers:
+            for w in get_workers(u):
                 risk_prop = propagation.RiskPropagation(
                     tol=0.3,
                     workers=w,
                     timeout=0 if w == 1 else 5,
                     logger=logger)
                 risk_prop.run(dataset.scores, dataset.contacts)
+
+    @staticmethod
+    def _workers(users: int):
+        if 200 <= users <= 1000:
+            workers = (1, 2)
+        elif 2000 <= users <= 10000:
+            workers = (2, 4)
+        else:
+            workers = (4, 8)
+        return workers
 
     @staticmethod
     def _logfile(graph: str, ext: str, users: Optional[int] = None) -> str:
