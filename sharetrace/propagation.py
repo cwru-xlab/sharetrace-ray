@@ -9,9 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import (
     Any, Collection, Hashable, Iterable, Mapping, MutableMapping, Optional,
-    Sequence, Set,
-    Tuple,
-    Type, Union
+    Sequence, Set, Tuple, Type, Union
 )
 
 import numpy as np
