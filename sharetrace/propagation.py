@@ -456,15 +456,14 @@ class RiskPropagation(ActorSystem):
         no_ne = {u2i[u]: initial(scores[u])["val"] for u in no_ne}
         results = ray.get(results)
         exposures = self._gather(results, u2i, no_ne)
-        # noinspection PyTypeChecker
         self._log(
             graph=graph,
             build_time=build_time,
             partition_runtime=partition_runtime,
             worker_logs=[r.log for r in results],
-            membership=n2p.tolist(),
-            symptoms=[float(initial(s)["val"]) for s in scores],
-            exposures=exposures.tolist())
+            membership=n2p,
+            symptoms=(float(initial(s)["val"]) for s in scores),
+            exposures=exposures)
         self._save_log()
         return exposures
 
