@@ -353,7 +353,6 @@ class RiskPropagation(ActorSystem):
         "max_dur",
         "early_stop",
         "partitioning",
-        "auto",
         "logger",
         "nodes",
         "edges",
@@ -371,7 +370,6 @@ class RiskPropagation(ActorSystem):
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None,
             partitioning: str = "spectral",
-            auto: bool = True,
             logger: Optional[logging.Logger] = None):
         super().__init__(ACTOR_SYSTEM)
         self._check_params(
@@ -394,7 +392,6 @@ class RiskPropagation(ActorSystem):
         self.max_dur = max_dur
         self.early_stop = early_stop
         self.partitioning = partitioning
-        self.auto = auto
         self.logger = logger
         self.nodes: int = -1
         self.edges: int = -1
@@ -437,11 +434,9 @@ class RiskPropagation(ActorSystem):
         if len(scores) == 0 or len(contacts) == 0:
             result = np.array([])
         else:
-            if self.auto:
-                self.on_start()
+            self.on_start()
             result = self._run(scores, contacts)
-            if self.auto:
-                self.on_stop()
+            self.on_stop()
         return result
 
     def on_start(self):
