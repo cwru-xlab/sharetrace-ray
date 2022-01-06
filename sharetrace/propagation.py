@@ -375,17 +375,16 @@ class RiskPropagation(ActorSystem):
             auto: bool = True,
             logger: Optional[logging.Logger] = None):
         super().__init__(ACTOR_SYSTEM)
-        assert isinstance(time_buffer, int) and time_buffer > 0
-        assert isinstance(time_const, Real) and time_const > 0
-        assert isinstance(tol, Real) and tol >= 0
-        assert isinstance(workers, int) and workers > 0
-        if timeout is not None:
-            assert isinstance(timeout, Real) and timeout >= 0
-        if max_dur is not None:
-            assert isinstance(max_dur, Real) and max_dur > 0
-        if early_stop is not None:
-            assert isinstance(early_stop, int) and early_stop > 0
-        assert partitioning in ("metis", "spectral")
+        self._check_params(
+            time_buffer=time_buffer,
+            time_const=time_const,
+            transmission=transmission,
+            tol=tol, eps=eps,
+            workers=workers,
+            timeout=timeout,
+            max_dur=max_dur,
+            early_stop=early_stop,
+            partitioning=partitioning)
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
@@ -401,6 +400,34 @@ class RiskPropagation(ActorSystem):
         self.nodes: int = -1
         self.edges: int = -1
         self.log: Log = {}
+
+    @staticmethod
+    def _check_params(
+            *,
+            time_buffer,
+            time_const,
+            transmission,
+            tol,
+            eps,
+            workers,
+            timeout,
+            max_dur,
+            early_stop,
+            partitioning
+    ) -> None:
+        assert isinstance(time_buffer, int) and time_buffer > 0
+        assert isinstance(time_const, Real) and time_const > 0
+        assert isinstance(transmission, Real) and 0 < transmission <= 1
+        assert isinstance(tol, Real) and tol >= 0
+        assert isinstance(eps, Real) and eps > 0
+        assert isinstance(workers, int) and workers > 0
+        if timeout is not None:
+            assert isinstance(timeout, Real) and timeout >= 0
+        if max_dur is not None:
+            assert isinstance(max_dur, Real) and max_dur > 0
+        if early_stop is not None:
+            assert isinstance(early_stop, int) and early_stop > 0
+        assert partitioning in ("metis", "spectral")
 
     def send(self, parts: Sequence[NpMap]) -> None:
         neighbors = self.neighbors
