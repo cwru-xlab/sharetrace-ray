@@ -319,10 +319,9 @@ class _Partition(Actor):
 
         nodes, (condition, data) = self._nodes, self._stop_condition
         props = nodes.values()
-        update = np.array([node["curr"] - node["init_val"] for node in props])
-        update = update[update != 0]
-        updates = np.array([node["updates"] for node in props])
-        updates = updates[updates != 0]
+        update = np.array([
+            u for node in props if (u := node["curr"] - node["init_val"]) > 0])
+        updates = np.array([u for node in props if (u := node["updates"]) > 0])
         return WorkerLog(
             name=self.name,
             runtime=runtime,
@@ -626,7 +625,7 @@ class RiskPropagation(ActorSystem):
             "Parameters": {
                 "TimeBufferInSeconds": float(self.time_buffer),
                 "Transmission": approx(self.transmission),
-                "ZeroEpsilon": float(self.eps),
+                "ZeroApproximation": float(self.eps),
                 "SendTolerance": approx(self.tol),
                 "Workers": int(self.workers),
                 "TimeoutInSeconds": approx(self.timeout),
