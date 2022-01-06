@@ -440,7 +440,7 @@ class RiskPropagation(ActorSystem):
             graph=graph,
             build_time=build_time,
             partition_runtime=partition_runtime,
-            results=results,
+            worker_logs=[r.log for r in results],
             membership=n2p.tolist(),
             symptoms=[float(initial(s)["val"]) for s in scores],
             exposures=exposures.tolist())
@@ -579,34 +579,35 @@ class RiskPropagation(ActorSystem):
 
     def _log(
             self,
-            symptoms: Sequence[float],
-            exposures: Sequence[float],
+            symptoms: Iterable[float],
+            exposures: Iterable[float],
             graph: Graph,
-            membership: Sequence[int],
+            membership: Iterable[int],
             build_time: float,
             partition_runtime: float,
-            results: Iterable[Result]):
+            worker_logs: Collection[WorkerLog]):
         approx = util.approx
         self.log.update({
-            "GraphSizeInMb": approx(util.get_mb(graph)),
-            "GraphBuildTimeInSeconds": approx(build_time),
-            "PartitionTimeInSeconds": approx(partition_runtime),
-            "Nodes": int(self.nodes),
-            "Edges": int(self.edges),
-            "TimeBufferInSeconds": float(self.time_buffer),
-            "Transmission": approx(self.transmission),
-            "ZeroEpsilon": self.eps,
-            "SendTolerance": approx(self.tol),
-            "Workers": int(self.workers),
-            "TimeoutInSeconds": approx(self.timeout),
-            "MaxDurationInSeconds": approx(self.max_dur),
-            "EarlyStop": self.early_stop,
-            "Membership": membership,
-            "SymptomScores": symptoms,
-            "ExposureScores": exposures})
-        logs = [r.log for r in results]
-        self.log.update(WorkerLog.summarize(*logs))
-        self.log["WorkerLogs"] = [log.format() for log in logs]
+            "Statistics": {
+                "GraphSizeInMb": approx(util.get_mb(graph)),
+                "GraphBuildTimeInSeconds": approx(build_time),
+                "PartitionTimeInSeconds": approx(partition_runtime),
+                "Nodes": int(self.nodes),
+                "Edges": int(self.edges),
+                **WorkerLog.summarize(*worker_logs),
+                "WorkerStatistics": [log.format() for log in worker_logs]},
+            "Parameters": {
+                "TimeBufferInSeconds": float(self.time_buffer),
+                "Transmission": approx(self.transmission),
+                "ZeroEpsilon": float(self.eps),
+                "SendTolerance": approx(self.tol),
+                "Workers": int(self.workers),
+                "TimeoutInSeconds": approx(self.timeout),
+                "MaxDurationInSeconds": approx(self.max_dur),
+                "EarlyStop": approx(self.early_stop)},
+            "Membership": list(membership),
+            "SymptomScores": list(symptoms),
+            "ExposureScores": list(exposures)})
 
     def _save_log(self) -> None:
         if (logger := self.logger) is not None:
