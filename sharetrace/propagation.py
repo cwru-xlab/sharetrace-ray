@@ -221,7 +221,7 @@ class _Partition(Actor):
 
     def receive(self) -> Optional:
         # Prioritize local convergence over processing remote messages.
-        if len((local := self._local)) > 0:
+        if len(local := self._local) > 0:
             msg = local.popleft()
         else:
             try:
@@ -257,8 +257,7 @@ class _Partition(Actor):
         nodes = {}
         transmission = self.transmission
         for var, vscores in scores.items():
-            init = initial(vscores)
-            init_msg = init.copy()
+            init_msg = (init := initial(vscores)).copy()
             init_msg["val"] *= transmission
             nodes[var] = {
                 "init_val": init["val"],
