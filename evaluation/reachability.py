@@ -153,8 +153,7 @@ class MessageReachability:
         append = nodes.append
         for n in range(source):
             append(Node(n, init=inits[n]))
-        nodes.append(
-            Node(source, dist=0, msg=scores[source], init=inits[source]))
+        append(Node(source, dist=0, msg=scores[source], init=inits[source]))
         for n in range(source + 1, len(scores)):
             append(Node(n, init=inits[n]))
         heapq.heapify(heap := nodes.copy())
