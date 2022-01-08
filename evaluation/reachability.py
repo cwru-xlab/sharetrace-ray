@@ -17,6 +17,13 @@ AdjList = Mapping[int, Union[Sequence, np.ndarray]]
 Reached = Mapping[int, Mapping[int, int]]
 
 
+def reachability_ratio(reached: Reached, edges: int) -> float:
+    ckey = propagation.ckey
+    actual = len(set(ckey(n, ne) for n, nes in reached.items() for ne in nes))
+    ideal = edges
+    return actual / ideal
+
+
 class Node:
     """A node used by MessageReachability.
 
@@ -73,6 +80,7 @@ class Node:
 
 
 class MessageReachability:
+    """Equivalent to the set of influence of a node in a temporal graph."""
     __slots__ = ("transmission", "tol", "buffer", "workers", "verbose")
 
     def __init__(
