@@ -15,12 +15,13 @@ import numpy as np
 import tqdm
 
 from evaluation import reachability
-from sharetrace import model, propagation
+from sharetrace import model, propagation, util
 from sharetrace.propagation import RiskPropagation
-from synthetic import (ContactFactory, DataFactory, Dataset, DatasetFactory,
-                       ScoreFactory, SocioPatternsContactFactory,
-                       SocioPatternsDatasetFactory, SocioPatternsScoreFactory,
-                       TimeFactory, UniformBernoulliValueFactory)
+from synthetic import (CachedGraphFactory, ContactFactory, DataFactory, Dataset,
+                       DatasetFactory, ScoreFactory,
+                       SocioPatternsContactFactory, SocioPatternsDatasetFactory,
+                       SocioPatternsGraphFactory, TimeFactory,
+                       UniformBernoulliValueFactory)
 
 SCALABILITY_DIR = ".//logs//scalability"
 pathlib.Path(SCALABILITY_DIR).mkdir(parents=True, exist_ok=True)
@@ -28,7 +29,7 @@ pathlib.Path(SCALABILITY_DIR).mkdir(parents=True, exist_ok=True)
 PARAMS_DIR = ".//logs//parameters"
 pathlib.Path(PARAMS_DIR).mkdir(parents=True, exist_ok=True)
 
-REAL_WORLD_DIR = ".//logs//real-world"
+REAL_WORLD_DIR = ".//logs//real"
 pathlib.Path(REAL_WORLD_DIR).mkdir(parents=True, exist_ok=True)
 
 
@@ -62,13 +63,14 @@ def create_sociopatterns_data(
         graph_path: Optional[str] = None,
         seed=None
 ) -> Dataset:
+    graph_factory = CachedGraphFactory(SocioPatternsGraphFactory(path, sep))
     dataset_factory = SocioPatternsDatasetFactory(
-        score_factory=SocioPatternsScoreFactory(
+        score_factory=ScoreFactory(
             value_factory=UniformBernoulliValueFactory(
                 per_user=1, p=p, seed=seed),
             time_factory=TimeFactory(days=1, per_day=1, seed=seed)),
-        contact_factory=SocioPatternsContactFactory(
-            path=path, sep=sep, graph_path=graph_path))
+        graph_factory=graph_factory,
+        contact_factory=SocioPatternsContactFactory(graph_factory, graph_path))
     return dataset_factory()
 
 
@@ -80,11 +82,13 @@ def create_synthetic_data(
         graph_path: Optional[str] = None,
         seed=None,
 ) -> Dataset:
+    graph_factory = CachedGraphFactory(graph_factory)
     dataset_factory = DatasetFactory(
         score_factory=ScoreFactory(
             value_factory=UniformBernoulliValueFactory(
                 per_user=days, p=p, seed=seed),
             time_factory=TimeFactory(days=days, per_day=1, seed=seed)),
+        graph_factory=graph_factory,
         contact_factory=ContactFactory(
             graph_factory=graph_factory,
             time_factory=TimeFactory(
@@ -104,8 +108,7 @@ def geometric_radius(n: int) -> float:
 
 
 def scale_free_cluster_graph(n: int, seed=None) -> ig.Graph:
-    graph = nx.generators.powerlaw_cluster_graph(
-        n, m=2, p=0.95, seed=seed)
+    graph = nx.generators.powerlaw_cluster_graph(n, m=2, p=0.95, seed=seed)
     return filter_isolated(ig.Graph.from_networkx(graph))
 
 
@@ -146,7 +149,7 @@ class SyntheticExperiments(ABC):
         if graph == "geometric":
             self.benchmark_geometric()
         elif graph == "power":
-            self.benchmark_power_law_cluster()
+            self.benchmark_scale_free_cluster()
         elif graph == "lfr":
             self.benchmark_lfr()
         else:
@@ -158,7 +161,7 @@ class SyntheticExperiments(ABC):
         factory = functools.partial(lambda n: geometric_graph(n, self.seed))
         self._benchmark(factory, "geometric")
 
-    def benchmark_power_law_cluster(self) -> None:
+    def benchmark_scale_free_cluster(self) -> None:
         factory = functools.partial(
             lambda n: scale_free_cluster_graph(n, self.seed))
         self._benchmark(factory, "power")
@@ -180,15 +183,13 @@ class ScalabilityExperiments(SyntheticExperiments):
         super().__init__(seed)
 
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
-        get_logfile, seed = self._logfile, self.seed
-        logger = get_logger(SCALABILITY_DIR, get_logfile(graph, "log"))
-        multiples = np.arange(2, 12, 2)
-        users = np.concatenate([(10 ** p) * multiples for p in range(2, 5)])
-        get_workers = self._workers
+        logger = get_logger(SCALABILITY_DIR, self._logfile(graph, "log"))
+        rng = np.arange(1, 11)
+        users = np.concatenate([rng * (10 ** p) for p in range(2, 5)])
         for u in tqdm.tqdm(users):
-            if u in (200, 2_000, 20_000):
+            if u in (100, 1000, 10000):
                 graph_path = os.path.join(
-                    SCALABILITY_DIR, get_logfile(graph, "graphml", u))
+                    SCALABILITY_DIR, self._logfile(graph, "graphml", u))
             else:
                 graph_path = None
             dataset = create_synthetic_data(
@@ -197,14 +198,22 @@ class ScalabilityExperiments(SyntheticExperiments):
                 graph_path=graph_path,
                 days=15,
                 p=0.2,
-                seed=seed)
-            for w in get_workers(u):
-                risk_prop = propagation.RiskPropagation(
-                    tol=0.3,
-                    workers=w,
-                    timeout=0 if w == 1 else 5,
-                    logger=logger)
-                risk_prop.run(dataset.scores, dataset.contacts)
+                seed=self.seed)
+            log_metrics = True
+            scores, contacts = dataset.scores, dataset.contacts
+            for w in self._workers(u):
+                kwargs = {
+                    "tol": 0.3,
+                    "workers": w,
+                    "timeout": 0 if w == 1 else 5,
+                    "logger": logger}
+                if log_metrics:
+                    graph = dataset.graph
+                    risk_prop = GraphMetricsRiskPropagation(graph, **kwargs)
+                    log_metrics = False
+                else:
+                    risk_prop = propagation.RiskPropagation(**kwargs)
+                risk_prop.run(scores, contacts)
 
     @staticmethod
     def _workers(users: int):
@@ -232,22 +241,20 @@ class ParameterExperiments(SyntheticExperiments):
         super().__init__(seed)
 
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
-        graph_path = os.path.join(PARAMS_DIR, self._logfile(graph, "graphml"))
-        dataset = create_synthetic_data(
-            users=10_000,
-            graph_factory=graph_factory,
-            days=15,
-            p=0.2,
-            graph_path=graph_path,
-            seed=self.seed)
         logger = get_logger(PARAMS_DIR, self._logfile(graph, "log"))
         # transmission = 1 never terminates because of no decay.
         loop = list(itertools.product(range(1, 11), range(1, 10)))
+        dataset = create_synthetic_data(
+            users=5_000,
+            graph_factory=graph_factory,
+            days=15,
+            p=0.2,
+            seed=self.seed)
         for tol, transmission in tqdm.tqdm(loop):
             risk_prop = propagation.RiskPropagation(
                 tol=tol / 10,
                 transmission=transmission / 10,
-                workers=4,
+                workers=2,
                 timeout=5,
                 logger=logger)
             risk_prop.run(dataset.scores, dataset.contacts)
@@ -290,19 +297,21 @@ class RealWorldExperiments:
         self._benchmark(setting="workplace", path=path, sep=" ")
 
     def _benchmark(self, setting: str, path: str, sep: str) -> None:
-        get_logfile = self._logfile
-        logger = get_logger(REAL_WORLD_DIR, get_logfile(setting, "log"))
-        seed = self.seed
+        logger = get_logger(REAL_WORLD_DIR, self._logfile(setting, "log"))
         for i in tqdm.trange(10):
             if i == 0:
                 graph_path = os.path.join(
-                    REAL_WORLD_DIR, get_logfile(setting, "graphml"))
+                    REAL_WORLD_DIR, self._logfile(setting, "graphml"))
             else:
                 graph_path = None
             dataset = create_sociopatterns_data(
-                path=path, sep=sep, p=0.2, graph_path=graph_path, seed=seed)
-            risk_prop = propagation.RiskPropagation(
-                tol=0.3, workers=4, timeout=5, logger=logger)
+                path=path,
+                sep=sep,
+                p=0.2,
+                graph_path=graph_path,
+                seed=self.seed)
+            risk_prop = GraphMetricsRiskPropagation(
+                dataset.graph, tol=0.3, workers=1, timeout=0, logger=logger)
             risk_prop.run(dataset.scores, dataset.contacts)
 
     @staticmethod
@@ -318,10 +327,13 @@ class GraphMetricsRiskPropagation(RiskPropagation):
         self.graph = graph
 
     def _run(self, scores, contacts):
+        result = super()._run(scores, contacts)
         self._log_graph_stats(scores, contacts)
-        return super()._run(scores, contacts)
+        return result
 
     def _log_graph_stats(self, scores, contacts):
+        graph = self.graph
+        approx = util.approx
         reach = reachability.MessageReachability(
             transmission=self.transmission,
             tol=self.tol,
@@ -331,22 +343,21 @@ class GraphMetricsRiskPropagation(RiskPropagation):
         reaches = itertools.chain(*(n.values() for n in reached.values()))
         reach_stats = self._basic_stats(reaches := np.array(list(reaches)))
         min_reached, max_reached, avg_reached, std_reached = reach_stats
-        deg_stats = self._basic_stats(degrees := self.graph.degree())
+        deg_stats = self._basic_stats(degrees := graph.degree())
         min_deg, max_deg, avg_deg, std_deg = deg_stats
-        effs = self.graph.harmonic_centrality(mode="all", normalized=True)
+        effs = graph.harmonic_centrality(mode="all", normalized=True)
         eff_stats = self._basic_stats(effs)
         min_eff, max_eff, avg_eff, std_eff = eff_stats
-        edges = len(self.graph.es)
-        nodes = len(self.graph.vs)
+        edges = len(graph.es)
         self.log["Statistics"].update({
             "MinMessageReachability": min_reached,
             "MaxMessageReachability": max_reached,
             "AvgMessageReachability": avg_reached,
             "StdMessageReachability": std_reached,
             "MessagesReachabilities": reaches.tolist(),
-            "ReachabilityRatio": reachability.ratio(reached, edges),
-            "Radius": self.graph.radius(mode="all"),
-            "Diameter": self.graph.diameter(directed=False, unconn=True),
+            "ReachabilityRatio": approx(reachability.ratio(reached, edges)),
+            "Radius": graph.radius(mode="all"),
+            "Diameter": graph.diameter(directed=False, unconn=True),
             "MinDegree": min_deg,
             "MaxDegree": max_deg,
             "AvgDegree": avg_deg,
@@ -356,13 +367,12 @@ class GraphMetricsRiskPropagation(RiskPropagation):
             "MaxEfficiency": max_eff,
             "AvgEfficiency": avg_eff,
             "StdEfficiency": std_eff,
-            "Efficiencies": effs,
-            "TemporalEfficiency": sum(1 / reaches) / (nodes * (nodes - 1))})
+            "Efficiencies": [approx(e) for e in effs]})
 
     @staticmethod
     def _basic_stats(data) -> Sequence[float]:
         ops = (np.min, np.max, np.mean, np.std)
-        return [float(op(data)) for op in ops]
+        return [util.approx(op(data)) for op in ops]
 
 
 def parse_scalability_exps(args: argparse.Namespace) -> None:
@@ -393,7 +403,7 @@ def main():
     parameters.add_argument("--seed", type=int, default=None)
     parameters.set_defaults(func=parse_parameter_exps)
 
-    real_world = subparsers.add_parser("real-world")
+    real_world = subparsers.add_parser("real")
     real_world.add_argument(
         "--setting",
         choices=("workplace", "highschool11", "highschool12", "conference"),
