@@ -8,10 +8,9 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Iterable, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import igraph as ig
-import networkx as nx
 import numpy as np
 from scipy import stats
 
@@ -19,7 +18,7 @@ from sharetrace import model
 from sharetrace.model import ArrayLike
 
 SEC_PER_DAY = 86400
-CONTACTS_FILE_FORMAT = 'data//contacts:{}.npy'
+CONTACTS_FILE_FORMAT = "data//contacts:{}.npy"
 
 
 def save_data(file, arr: np.ndarray):
@@ -43,7 +42,7 @@ class DataFactory(ABC, Callable):
 
 
 class UniformBernoulliValueFactory(DataFactory):
-    __slots__ = ('per_user', 'p', 'seed', '_rng')
+    __slots__ = ("per_user", "p", "seed", "_rng")
 
     def __init__(self, per_user: float = 15, p: float = 0.5, seed=None):
         assert 0 <= p <= 1
@@ -65,7 +64,7 @@ class UniformBernoulliValueFactory(DataFactory):
 
 
 class TimeFactory(DataFactory):
-    __slots__ = ('days', 'per_day', 'now', 'random_first', 'seed', '_rng')
+    __slots__ = ("days", "per_day", "now", "random_first", "seed", "_rng")
 
     def __init__(
             self,
@@ -106,14 +105,14 @@ class TimeFactory(DataFactory):
 
 class LocationFactory(DataFactory):
     __slots__ = (
-        'days',
-        'per_day',
-        'low',
-        'high',
-        'step_low',
-        'step_high',
-        'seed',
-        '_rng')
+        "days",
+        "per_day",
+        "low",
+        "high",
+        "step_low",
+        "step_high",
+        "seed",
+        "_rng")
 
     def __init__(
             self,
@@ -169,7 +168,7 @@ class LocationFactory(DataFactory):
 
 
 class GaussianMixture:
-    __slots__ = ('locs', 'scales', 'weights', 'components')
+    __slots__ = ("locs", "scales", "weights", "components")
 
     def __init__(self, locs: ArrayLike, scales: ArrayLike, weights: ArrayLike):
         self.locs = locs
@@ -184,7 +183,7 @@ class GaussianMixture:
 
 
 class GaussianMixtureLocationFactory(LocationFactory):
-    __slots__ = ('components', 'locs', 'scales', 'weights', '_mixture')
+    __slots__ = ("components", "locs", "scales", "weights", "_mixture")
 
     def __init__(
             self,
@@ -219,7 +218,7 @@ class GaussianMixtureLocationFactory(LocationFactory):
 
 
 class Dataset:
-    __slots__ = ('scores', 'histories', 'contacts')
+    __slots__ = ("scores", "histories", "contacts")
 
     def __init__(
             self,
@@ -237,7 +236,7 @@ class Dataset:
         else:
             return model.to_geohashes(*self.histories, prec=prec)
 
-    def save(self, path: str = '.') -> None:
+    def save(self, path: str = ".") -> None:
         self._mkdir(path)
         save_data(self._scores_file(path), self.scores)
         if self.histories is not None:
@@ -255,7 +254,7 @@ class Dataset:
     @classmethod
     def load(
             cls,
-            path: str = '.',
+            path: str = ".",
             histories: bool = False,
             contacts: bool = False
     ) -> Dataset:
@@ -269,19 +268,19 @@ class Dataset:
 
     @staticmethod
     def _scores_file(path: str) -> str:
-        return os.path.join(path, 'scores.npy')
+        return os.path.join(path, "scores.npy")
 
     @staticmethod
     def _histories_file(path: str) -> str:
-        return os.path.join(path, 'histories.npy')
+        return os.path.join(path, "histories.npy")
 
     @staticmethod
     def _contacts_file(path: str) -> str:
-        return os.path.join(path, 'contacts.npy')
+        return os.path.join(path, "contacts.npy")
 
 
 class DatasetFactory(DataFactory):
-    __slots__ = ('score_factory', 'history_factory', 'contact_factory')
+    __slots__ = ("score_factory", "history_factory", "contact_factory")
 
     def __init__(
             self,
@@ -304,7 +303,7 @@ class DatasetFactory(DataFactory):
 
 
 class ScoreFactory(DataFactory):
-    __slots__ = ('value_factory', 'time_factory')
+    __slots__ = ("value_factory", "time_factory")
 
     def __init__(self, value_factory: DataFactory, time_factory: DataFactory):
         super().__init__()
@@ -321,7 +320,7 @@ class ScoreFactory(DataFactory):
 
 
 class HistoryFactory(DataFactory):
-    __slots__ = ('loc_factory', 'time_factory')
+    __slots__ = ("loc_factory", "time_factory")
 
     def __init__(self, loc_factory: DataFactory, time_factory: DataFactory):
         super().__init__()
@@ -337,7 +336,7 @@ class HistoryFactory(DataFactory):
 
 
 class ContactFactory(DataFactory):
-    __slots__ = ('graph_factory', 'time_factory', 'graph_path')
+    __slots__ = ("graph_factory", "time_factory", "graph_path")
 
     def __init__(
             self,
@@ -350,43 +349,14 @@ class ContactFactory(DataFactory):
         self.graph_path = graph_path
 
     def __call__(self, n: int, **kwargs) -> np.ndarray:
-        graph = self.graph_factory(n)
+        graph: ig.Graph = self.graph_factory(n)
         if (path := self.graph_path) is not None:
             graph.save(path)
-        ts = self.time_factory(graph.num_edges)
+        ts = self.time_factory(len(edges := graph.es))
+        es = (e.tuple for e in edges)
         contact = model.contact
-        es = graph.edges()
         return np.array([
             contact((n1, n2), t) for (n1, n2), t in zip(es, ts) if n1 != n2])
-
-
-class Graph(ABC):
-    __slots__ = ()
-
-    def __init__(self):
-        super().__init__()
-
-    @property
-    @abstractmethod
-    def num_nodes(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def num_edges(self) -> int:
-        pass
-
-    @abstractmethod
-    def nodes(self, *args) -> Iterable:
-        pass
-
-    @abstractmethod
-    def edges(self, *args) -> Iterable[Tuple]:
-        pass
-
-    @abstractmethod
-    def save(self, path: str) -> None:
-        pass
 
 
 class GraphFactory(DataFactory):
@@ -396,7 +366,7 @@ class GraphFactory(DataFactory):
         super().__init__()
 
     @abstractmethod
-    def __call__(self, n: int, **kwargs) -> Graph:
+    def __call__(self, n: int, **kwargs) -> ig.Graph:
         pass
 
 
@@ -407,57 +377,8 @@ class GraphReader(ABC):
         super().__init__()
 
     @abstractmethod
-    def read(self, path: str) -> Graph:
+    def read(self, path: str) -> ig.Graph:
         pass
-
-
-class IGraph(Graph):
-    __slots__ = ('_graph',)
-
-    def __init__(self, graph: Union[ig.Graph, nx.Graph]):
-        super().__init__()
-        if isinstance(graph, nx.Graph):
-            graph = ig.Graph.from_networkx(graph)
-        self._graph = graph
-
-    @property
-    def num_nodes(self) -> int:
-        return len(self._graph.vs)
-
-    @property
-    def num_edges(self) -> int:
-        return len(self._graph.es)
-
-    def nodes(self, *args) -> Iterable:
-        nodes = self._graph.vs
-        if args:
-            if len(args) == 1:
-                k = args[0]
-                nodes = ((n.index, n[k]) for n in nodes)
-            else:
-                nodes = ((n.index, tuple(n[k] for k in args)) for n in nodes)
-        else:
-            nodes = iter(nodes.indices)
-        return nodes
-
-    def edges(self, *args) -> Iterable[Tuple]:
-        edges = self._graph.es
-        if args:
-            if len(args) == 1:
-                k = args[0]
-                edges = ((e.tuple, e[k]) for e in edges)
-            else:
-                edges = ((e.tuple, tuple(e[k] for k in args)) for e in edges)
-        else:
-            edges = (e.tuple for e in edges)
-        return edges
-
-    def save(self, path: str) -> None:
-        self._graph.write(path)
-
-    def __repr__(self):
-        cls = self.__class__.__name__
-        return f'{cls}(nodes={self.num_nodes}, edges={self.num_edges})'
 
 
 class SocioPatternsGraphReader(GraphReader):
@@ -467,7 +388,7 @@ class SocioPatternsGraphReader(GraphReader):
         super().__init__()
         self.sep = sep
 
-    def read(self, path: str) -> Graph:
+    def read(self, path: str) -> ig.Graph:
         def by_pair(triple):
             return triple[1:]
 
@@ -485,8 +406,7 @@ class SocioPatternsGraphReader(GraphReader):
         offset = round(datetime.datetime.utcnow().timestamp())
         times = [t + offset for t, _, _ in triples]
         edges = [(idx[n1], idx[n2]) for _, n1, n2 in triples]
-        graph = ig.Graph(edges=edges, edge_attrs={'time': times})
-        return IGraph(graph)
+        return ig.Graph(edges=edges, edge_attrs={'time': times})
 
     def _parse(self, line: str) -> Tuple[int, int, int]:
         t, n1, n2 = line.rstrip('\n').split(self.sep)[:3]
@@ -509,7 +429,7 @@ class SocioPatternsDatasetFactory(DataFactory):
         contacts = self.contact_factory()
         scores = self.score_factory(
             self.contact_factory.nodes, now=self.contact_factory.start)
-        assert np.min(contacts['time']) - np.max(scores['time']) > 0
+        assert np.min(contacts["time"]) - np.max(scores["time"]) > 0
         return Dataset(scores=scores, contacts=contacts)
 
 
@@ -524,12 +444,12 @@ class SocioPatternsScoreFactory(ScoreFactory):
 
 
 class SocioPatternsContactFactory(DataFactory):
-    __slots__ = ('path', 'sep', 'nodes', 'start', 'graph_path')
+    __slots__ = ("path", "sep", "nodes", "start", "graph_path")
 
     def __init__(
             self,
             path: str,
-            sep: str = ' ',
+            sep: str = " ",
             graph_path: Optional[str] = None):
         super().__init__()
         self.path = path
@@ -542,7 +462,7 @@ class SocioPatternsContactFactory(DataFactory):
         graph = SocioPatternsGraphReader(self.sep).read(self.path)
         if (path := self.graph_path) is not None:
             graph.save(path)
-        self.nodes = graph.num_nodes
+        self.nodes = len(graph.vs)
         # Raw contact times are nonzero and shifted forward from now. To
         # ensure all risk score timestamps are prior to the first contact,
         # we set the start time used by the time factory to be yesterday.
@@ -551,4 +471,5 @@ class SocioPatternsContactFactory(DataFactory):
         start = datetime.datetime.utcnow() - datetime.timedelta(days=1)
         self.start = round(start.timestamp())
         contact = model.contact
-        return np.array([contact(names, t) for names, t in graph.edges('time')])
+        es = ((e.tuple, e["time"]) for e in graph.es)
+        return np.array([contact(names, t) for names, t in es])

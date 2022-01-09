@@ -14,10 +14,9 @@ import networkx as nx
 import numpy as np
 import tqdm
 
-from evaluation import synthetic
 from sharetrace import model, propagation
 from synthetic import (ContactFactory, DataFactory, Dataset, DatasetFactory,
-                       Graph, ScoreFactory, SocioPatternsContactFactory,
+                       ScoreFactory, SocioPatternsContactFactory,
                        SocioPatternsDatasetFactory, SocioPatternsScoreFactory,
                        TimeFactory, UniformBernoulliValueFactory)
 
@@ -92,25 +91,23 @@ def create_synthetic_data(
     return dataset_factory(users)
 
 
-def create_geometric_graph(n: int, seed=None) -> Graph:
+def geometric_graph(n: int, seed=None) -> ig.Graph:
     graph = nx.generators.random_geometric_graph(
         n, radius=geometric_radius(n), seed=seed)
-    graph = filter_isolated(ig.Graph.from_networkx(graph))
-    return synthetic.IGraph(graph)
+    return filter_isolated(ig.Graph.from_networkx(graph))
 
 
 def geometric_radius(n: int) -> float:
     return min(1, 0.25 ** (np.log10(n) - 1))
 
 
-def create_power_law_cluster_graph(n: int, seed=None) -> Graph:
+def scale_free_cluster_graph(n: int, seed=None) -> ig.Graph:
     graph = nx.generators.powerlaw_cluster_graph(
         n, m=2, p=0.95, seed=seed)
-    graph = filter_isolated(ig.Graph.from_networkx(graph))
-    return synthetic.IGraph(graph)
+    return filter_isolated(ig.Graph.from_networkx(graph))
 
 
-def create_lfr_graph(n: int, seed=None) -> Graph:
+def lfr_graph(n: int, seed=None) -> ig.Graph:
     graph = nx.generators.LFR_benchmark_graph(
         n,
         tau1=3,
@@ -122,7 +119,7 @@ def create_lfr_graph(n: int, seed=None) -> Graph:
         max_community=100,
         seed=seed)
     # Wrap with filter_isolated() if min_degree < 2
-    return synthetic.IGraph(ig.Graph.from_networkx(graph))
+    return ig.Graph.from_networkx(graph)
 
 
 def get_logger(directory: str, logfile: str) -> logging.Logger:
@@ -156,19 +153,17 @@ class SyntheticExperiments(ABC):
                 f"not {graph}")
 
     def benchmark_geometric(self) -> None:
-        graph_factory = functools.partial(
-            lambda n: create_geometric_graph(n, seed=self.seed))
-        self._benchmark(graph_factory, "geometric")
+        factory = functools.partial(lambda n: geometric_graph(n, self.seed))
+        self._benchmark(factory, "geometric")
 
     def benchmark_power_law_cluster(self) -> None:
-        graph_factory = functools.partial(
-            lambda n: create_power_law_cluster_graph(n, seed=self.seed))
-        self._benchmark(graph_factory, "power")
+        factory = functools.partial(
+            lambda n: scale_free_cluster_graph(n, self.seed))
+        self._benchmark(factory, "power")
 
     def benchmark_lfr(self) -> None:
-        graph_factory = functools.partial(
-            lambda n: create_lfr_graph(n, seed=self.seed))
-        self._benchmark(graph_factory, "lfr")
+        factory = functools.partial(lambda n: lfr_graph(n, self.seed))
+        self._benchmark(factory, "lfr")
 
     @abstractmethod
     def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
