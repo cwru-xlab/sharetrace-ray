@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --time=24:00:00
-#SBATCH -p classc -A sxg125_csds438 -N 1 -n 8 --mem=16gb
+#SBATCH --time=4:00:00
+#SBATCH -p batch -A exa208 -N 1 -n 4 --mem=8gb
 #SBATCH --job-name="real-highschool12"
 #SBATCH --mail-user=rdt46@case.edu
 #SBATCH --mail-type=ALL
@@ -24,7 +24,7 @@ pip install -e ~/$PACKAGE
 
 cd ~/$PACKAGE/evaluation
 
-python3 eval.py real-world \
+python3 eval.py real \
     --setting highschool12 --path data/highschool_2012.csv --seed 12345
 
 cp -ru * $SLURM_SUBMIT_DIR
