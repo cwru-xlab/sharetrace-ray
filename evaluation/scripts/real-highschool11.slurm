@@ -29,4 +29,4 @@ cd ~/$PACKAGE/evaluation
 python3 evaluate.py $TYPE \
     --setting $SETTING --path data/$SETTING.csv --seed 12345
 
-cp logs/$TYPE/$SETTING-* $SLURM_SUBMIT_DIR
+cp logs/$TYPE/$SETTING-* ~/$PACKAGE/evaluation/logs/$TYPE
