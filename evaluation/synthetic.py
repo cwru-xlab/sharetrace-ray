@@ -218,14 +218,16 @@ class GaussianMixtureLocationFactory(LocationFactory):
 
 
 class Dataset:
-    __slots__ = ("scores", "histories", "contacts")
+    __slots__ = ("scores", "graph", "histories", "contacts")
 
     def __init__(
             self,
             scores: ArrayLike,
+            graph: Optional[ig.Graph] = None,
             histories: Optional[ArrayLike] = None,
             contacts: Optional[ArrayLike] = None):
         self.scores = scores
+        self.graph = graph
         self.histories = histories
         self.contacts = contacts
 
@@ -239,10 +241,12 @@ class Dataset:
     def save(self, path: str = ".") -> None:
         self._mkdir(path)
         save_data(self._scores_file(path), self.scores)
-        if self.histories is not None:
-            save_data(self._histories_file(path), self.histories)
-        if self.contacts is not None:
-            save_data(self._contacts_file(path), self.contacts)
+        if (graph := self.graph) is not None:
+            ig.write(graph, self._graph_file(path))
+        if (histories := self.histories) is not None:
+            save_data(self._histories_file(path), histories)
+        if (contacts := self.contacts) is not None:
+            save_data(self._contacts_file(path), contacts)
 
     @staticmethod
     def _mkdir(path: str) -> None:
@@ -255,20 +259,27 @@ class Dataset:
     def load(
             cls,
             path: str = ".",
+            graph: bool = False,
             histories: bool = False,
             contacts: bool = False
     ) -> Dataset:
         scores = load(Dataset._scores_file(path))
-        histories_, contacts_ = None, None
+        graph_, histories_, contacts_ = None, None, None
+        if graph:
+            graph_ = ig.read(Dataset._graph_file(path))
         if histories:
             histories_ = load(Dataset._histories_file(path))
         if contacts:
             contacts_ = load(Dataset._contacts_file(path))
-        return Dataset(scores, histories_, contacts_)
+        return Dataset(scores, graph_, histories_, contacts_)
 
     @staticmethod
     def _scores_file(path: str) -> str:
         return os.path.join(path, "scores.npy")
+
+    @staticmethod
+    def _graph_file(path: str) -> str:
+        return os.path.join(path, "graph.graphml")
 
     @staticmethod
     def _histories_file(path: str) -> str:
@@ -280,26 +291,31 @@ class Dataset:
 
 
 class DatasetFactory(DataFactory):
-    __slots__ = ("score_factory", "history_factory", "contact_factory")
+    __slots__ = (
+        "score_factory", "graph_factory", "history_factory", "contact_factory")
 
     def __init__(
             self,
             score_factory: DataFactory,
+            graph_factory: Optional[DataFactory] = None,
             history_factory: Optional[DataFactory] = None,
             contact_factory: Optional[DataFactory] = None):
         super().__init__()
         self.score_factory = score_factory
+        self.graph_factory = graph_factory
         self.history_factory = history_factory
         self.contact_factory = contact_factory
 
     def __call__(self, n: int, **kwargs) -> Dataset:
-        scores = self.score_factory(n)
-        histories, contacts = None, None
+        scores = self.score_factory(n, **kwargs)
+        graph, histories, contacts = None, None, None
+        if (factory := self.graph_factory) is not None:
+            graph = factory(n, **kwargs)
         if (factory := self.history_factory) is not None:
-            histories = factory(n)
+            histories = factory(n, **kwargs)
         if (factory := self.contact_factory) is not None:
-            contacts = factory(n)
-        return Dataset(scores=scores, histories=histories, contacts=contacts)
+            contacts = factory(n, **kwargs)
+        return Dataset(scores, graph, histories, contacts)
 
 
 class ScoreFactory(DataFactory):
@@ -311,8 +327,8 @@ class ScoreFactory(DataFactory):
         self.time_factory = time_factory
 
     def __call__(self, n: int, now: int = None, **kwargs) -> np.ndarray:
-        values = self.value_factory(n)
-        times = self.time_factory(n, now=now)
+        values = self.value_factory(n, **kwargs)
+        times = self.time_factory(n, now=now, **kwargs)
         risk_score = model.risk_score
         return np.array([
             [risk_score(v, t) for v, t in zip(vs, ts)]
@@ -328,7 +344,8 @@ class HistoryFactory(DataFactory):
         self.time_factory = time_factory
 
     def __call__(self, n: int, **kwargs) -> np.ndarray:
-        locations, times = self.loc_factory(n), self.time_factory(n)
+        locations = self.loc_factory(n, **kwargs)
+        times = self.time_factory(n, **kwargs)
         tloc, history = model.temporal_loc, model.history
         return np.array([
             history([tloc(loc, t) for t, loc in zip(ts, locs.T)], name)
@@ -349,53 +366,46 @@ class ContactFactory(DataFactory):
         self.graph_path = graph_path
 
     def __call__(self, n: int, **kwargs) -> np.ndarray:
-        graph: ig.Graph = self.graph_factory(n)
+        graph: ig.Graph = self.graph_factory(n, **kwargs)
         if (path := self.graph_path) is not None:
             graph.save(path)
-        ts = self.time_factory(len(edges := graph.es))
+        ts = self.time_factory(len(edges := graph.es), **kwargs)
         es = (e.tuple for e in edges)
         contact = model.contact
         return np.array([
             contact((n1, n2), t) for (n1, n2), t in zip(es, ts) if n1 != n2])
 
 
-class GraphFactory(DataFactory):
-    __slots__ = ()
+class CachedGraphFactory(DataFactory):
+    __slots__ = ("graph_factory", "_graph")
 
-    def __init__(self):
+    def __init__(self, graph_factory: DataFactory):
         super().__init__()
+        self.graph_factory = graph_factory
+        self._graph = None
 
-    @abstractmethod
-    def __call__(self, n: int, **kwargs) -> ig.Graph:
-        pass
+    def __call__(self, n: int = None, **kwargs):
+        if self._graph is None:
+            self._graph = self.graph_factory(n, **kwargs)
+        return self._graph
 
 
-class GraphReader(ABC):
-    __slots__ = ()
+class SocioPatternsGraphFactory(DataFactory):
+    __slots__ = ("path", "sep")
 
-    def __init__(self):
+    def __init__(self, path: str, sep=" "):
         super().__init__()
-
-    @abstractmethod
-    def read(self, path: str) -> ig.Graph:
-        pass
-
-
-class SocioPatternsGraphReader(GraphReader):
-    __slots__ = ('sep',)
-
-    def __init__(self, sep=' '):
-        super().__init__()
+        self.path = path
         self.sep = sep
 
-    def read(self, path: str) -> ig.Graph:
+    def __call__(self, n: int = None, **kwargs):
         def by_pair(triple):
             return triple[1:]
 
         def by_time(triple):
             return triple[0]
 
-        with open(path, 'r') as f:
+        with open(self.path, "r") as f:
             triples = sorted(map(self._parse, f.readlines()), key=by_pair)
         groups = itertools.groupby(triples, key=by_pair)
         # Use the most recent time as the time of contact.
@@ -406,60 +416,53 @@ class SocioPatternsGraphReader(GraphReader):
         offset = round(datetime.datetime.utcnow().timestamp())
         times = [t + offset for t, _, _ in triples]
         edges = [(idx[n1], idx[n2]) for _, n1, n2 in triples]
-        return ig.Graph(edges=edges, edge_attrs={'time': times})
+        return ig.Graph(edges=edges, edge_attrs={"time": times})
 
     def _parse(self, line: str) -> Tuple[int, int, int]:
-        t, n1, n2 = line.rstrip('\n').split(self.sep)[:3]
+        t, n1, n2 = line.rstrip("\n").split(self.sep)[:3]
         t, n1, n2 = int(t), int(n1), int(n2)
         return t, min(n1, n2), max(n1, n2)
 
 
 class SocioPatternsDatasetFactory(DataFactory):
-    __slots__ = ('score_factory', 'contact_factory')
+    __slots__ = ("score_factory", "graph_factory", "contact_factory")
 
     def __init__(
             self,
-            score_factory: SocioPatternsScoreFactory,
+            score_factory: DataFactory,
+            graph_factory: DataFactory,
             contact_factory: SocioPatternsContactFactory):
         super().__init__()
         self.score_factory = score_factory
+        self.graph_factory = graph_factory
         self.contact_factory = contact_factory
 
     def __call__(self, n: int = None, **kwargs) -> Dataset:
-        contacts = self.contact_factory()
+        contacts = self.contact_factory(**kwargs)
         scores = self.score_factory(
-            self.contact_factory.nodes, now=self.contact_factory.start)
+            self.contact_factory.nodes,
+            now=self.contact_factory.start,
+            **kwargs)
+        graph = self.graph_factory(n, **kwargs)
         assert np.min(contacts["time"]) - np.max(scores["time"]) > 0
-        return Dataset(scores=scores, contacts=contacts)
-
-
-class SocioPatternsScoreFactory(ScoreFactory):
-    __slots__ = ()
-
-    def __init__(self, value_factory: DataFactory, time_factory: TimeFactory):
-        super().__init__(value_factory, time_factory)
-
-    def __call__(self, n: int, now: int = None, **kwargs) -> np.ndarray:
-        return super().__call__(n, now=now)
+        return Dataset(scores=scores, graph=graph, contacts=contacts)
 
 
 class SocioPatternsContactFactory(DataFactory):
-    __slots__ = ("path", "sep", "nodes", "start", "graph_path")
+    __slots__ = ("graph_factory", "graph_path", "nodes", "start",)
 
     def __init__(
             self,
-            path: str,
-            sep: str = " ",
+            graph_factory: DataFactory,
             graph_path: Optional[str] = None):
         super().__init__()
-        self.path = path
-        self.sep = sep
+        self.graph_factory = graph_factory
         self.graph_path = graph_path
         self.nodes = -1
         self.start = -1
 
     def __call__(self, n: int = None, now: int = None, **kwargs) -> np.ndarray:
-        graph = SocioPatternsGraphReader(self.sep).read(self.path)
+        graph: ig.Graph = self.graph_factory(n, **kwargs)
         if (path := self.graph_path) is not None:
             graph.save(path)
         self.nodes = len(graph.vs)
