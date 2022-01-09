@@ -8,6 +8,6 @@ module load python/$PYTHON_VERSION
 
 export PYTHONUSERBASE=$HOME/.usr/local/python/$PYTHON_VERSION
 mkdir -p $PYTHONUSERBASE
-pip install --upgrade pip
-pip install -r $HOME/$PACKAGE/requirements.txt --user
-pip install -e $HOME/$PACKAGE
+python3 -m pip install --upgrade pip
+python3 -m pip install -r $HOME/$PACKAGE/requirements.txt --user
+python3 -m pip install -e $HOME/$PACKAGE

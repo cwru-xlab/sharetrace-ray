@@ -11,13 +11,9 @@ PACKAGE="contact-tracing"
 TYPE="real"
 SETTING="workplace"
 
-module swap intel gcc
-module load python/$PYTHON_VERSION
-
-cp ~/$PACKAGE $PFSDIR
+cp $HOME/$PACKAGE $PFSDIR
 cd $PFSDIR
-
-cd ~/$PACKAGE/evaluation
+cd $HOME/$PACKAGE/evaluation
 
 python3 evaluate.py $TYPE \
     --setting $SETTING --path data/$SETTING.txt --seed 12345

@@ -11,12 +11,8 @@ PACKAGE="contact-tracing"
 TYPE="parameters"
 GRAPH="lfr"
 
-module swap intel gcc
-module load python/$PYTHON_VERSION
-
-cp ~/$PACKAGE $PFSDIR
+cp $HOME/$PACKAGE $PFSDIR
 cd $PFSDIR
-
-cd ~/$PACKAGE/evaluation
+cd $HOME/$PACKAGE/evaluation
 
 python3 evaluate.py $TYPE --graph $GRAPH --seed 12345
