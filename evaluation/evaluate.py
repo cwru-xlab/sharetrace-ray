@@ -171,7 +171,7 @@ class SyntheticExperiments(ABC):
         self._benchmark(factory, "lfr")
 
     @abstractmethod
-    def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
+    def _benchmark(self, graph_factory: DataFactory, graph_name: str) -> None:
         pass
 
 
@@ -182,14 +182,14 @@ class ScalabilityExperiments(SyntheticExperiments):
     def __init__(self, seed=None):
         super().__init__(seed)
 
-    def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
-        logger = get_logger(SCALABILITY_DIR, self._logfile(graph, "log"))
+    def _benchmark(self, graph_factory: DataFactory, graph_name: str) -> None:
+        logger = get_logger(SCALABILITY_DIR, self._logfile(graph_name, "log"))
         rng = np.arange(1, 11)
         users = np.concatenate([rng * (10 ** p) for p in range(2, 5)])
         for u in tqdm.tqdm(users):
             if u in (100, 1000, 10000):
                 graph_path = os.path.join(
-                    SCALABILITY_DIR, self._logfile(graph, "graphml", u))
+                    SCALABILITY_DIR, self._logfile(graph_name, "graphml", u))
             else:
                 graph_path = None
             dataset = create_synthetic_data(
@@ -240,8 +240,8 @@ class ParameterExperiments(SyntheticExperiments):
     def __init__(self, seed=None):
         super().__init__(seed)
 
-    def _benchmark(self, graph_factory: DataFactory, graph: str) -> None:
-        logger = get_logger(PARAMS_DIR, self._logfile(graph, "log"))
+    def _benchmark(self, graph_factory: DataFactory, graph_name: str) -> None:
+        logger = get_logger(PARAMS_DIR, self._logfile(graph_name, "log"))
         # transmission = 1 never terminates because of no decay.
         loop = list(itertools.product(range(1, 11), range(1, 10)))
         dataset = create_synthetic_data(

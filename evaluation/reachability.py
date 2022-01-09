@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import collections
-import copy
 import functools
 import heapq
 from typing import (
@@ -180,12 +179,12 @@ class MessageReachability:
         pop = heapq.heappop
         transmission, tol, buffer = self.transmission, self.tol, self.buffer
         ckey = propagation.ckey
-        add = reached.add
+        add, get_ne = reached.add, adjlist.get
         while heap:
             node = pop(heap)
             if (msg := node.msg) is not None:
                 name, dist, init = node.name, node.dist, node.init
-                for n in adjlist[name]:
+                for n in get_ne(name, default=[]):
                     ne = nodes[n]
                     if msg["time"] <= contacts[ckey(name, ne.name)] + buffer:
                         send = msg.copy()
@@ -199,7 +198,7 @@ class MessageReachability:
                             add(ne)
 
     def copy(self) -> MessageReachability:
-        return copy.copy(self)
+        return self.__copy__()
 
     def __copy__(self) -> MessageReachability:
         return MessageReachability(

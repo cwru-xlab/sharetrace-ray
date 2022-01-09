@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --time=24:00:00
-#SBATCH -p batch -A exa208 -N 1 -n 8 --mem=32gb
+#SBATCH -p batch -A exa208 -N 1 -n 8 --mem=64gb
 #SBATCH --job-name="s-geometric"
 #SBATCH --mail-user=rdt46@case.edu
 #SBATCH --mail-type=ALL
