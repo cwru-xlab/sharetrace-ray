@@ -11,6 +11,7 @@ PACKAGE="contact-tracing"
 TYPE="scalability"
 GRAPH="power"
 
+module swap intel gcc
 module load python/$PYTHON_VERSION
 
 cp $HOME/$PACKAGE $PFSDIR

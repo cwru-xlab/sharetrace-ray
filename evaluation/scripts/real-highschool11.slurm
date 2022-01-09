@@ -11,6 +11,7 @@ PACKAGE="contact-tracing"
 TYPE="real"
 SETTING="highschool11"
 
+module swap intel gcc
 module load python/$PYTHON_VERSION
 
 cp $HOME/$PACKAGE $PFSDIR
