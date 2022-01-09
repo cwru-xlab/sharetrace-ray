@@ -449,7 +449,7 @@ class RiskPropagation(ActorSystem):
         self.log.clear()
         timed = util.time(lambda: self.create_graph(scores, contacts))
         graph, parts, u2i, n2p, no_ne, partition_runtime = timed.result
-        build_time = timed.seconds
+        build_runtime = timed.seconds
         self.send(parts)
         results = [a.run() for a in self.actors]
         # Compute the exposure score for those without neighbors.
@@ -458,7 +458,7 @@ class RiskPropagation(ActorSystem):
         exposures = self._gather(results, u2i, no_ne)
         self._log(
             graph=graph,
-            build_time=build_time,
+            build_time=build_runtime,
             partition_runtime=partition_runtime,
             worker_logs=[r.log for r in results],
             membership=n2p,
