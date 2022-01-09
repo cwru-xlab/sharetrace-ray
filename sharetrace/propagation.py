@@ -8,7 +8,8 @@ import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
-    Any, Collection, Hashable, Iterable, Mapping, MutableMapping, Optional,
+    Any, Collection, Hashable, Iterable, List, Mapping, MutableMapping,
+    Optional,
     Sequence, Set, Tuple, Type, Union
 )
 
@@ -441,12 +442,13 @@ class RiskPropagation(ActorSystem):
 
     def on_start(self):
         ray.init(ignore_reinit_error=True)
+        self.log.clear()
 
     def on_stop(self):
+        self._save_log()
         ray.shutdown()
 
     def _run(self, scores: NpSeq, contacts: Array) -> Array:
-        self.log.clear()
         timed = util.time(lambda: self.create_graph(scores, contacts))
         graph, parts, u2i, n2p, no_ne, partition_runtime = timed.result
         build_runtime = timed.seconds
@@ -456,15 +458,15 @@ class RiskPropagation(ActorSystem):
         no_ne = {u2i[u]: initial(scores[u])["val"] for u in no_ne}
         results = ray.get(results)
         exposures = self._gather(results, u2i, no_ne)
+        # noinspection PyTypeChecker
         self._log(
             graph=graph,
             build_runtime=build_runtime,
             partition_runtime=partition_runtime,
             worker_logs=[r.log for r in results],
-            membership=n2p,
-            symptoms=(float(initial(s)["val"]) for s in scores),
-            exposures=exposures)
-        self._save_log()
+            membership=n2p.tolist(),
+            symptoms=[float(initial(s)["val"]) for s in scores],
+            exposures=exposures.tolist())
         return exposures
 
     def create_graph(
@@ -599,10 +601,10 @@ class RiskPropagation(ActorSystem):
 
     def _log(
             self,
-            symptoms: Iterable[float],
-            exposures: Iterable[float],
+            symptoms: List[float],
+            exposures: List[float],
             graph: Graph,
-            membership: Iterable[int],
+            membership: List[int],
             build_runtime: float,
             partition_runtime: float,
             worker_logs: Collection[WorkerLog]):
@@ -625,9 +627,9 @@ class RiskPropagation(ActorSystem):
                 "TimeoutInSeconds": approx(self.timeout),
                 "MaxDurationInSeconds": approx(self.max_dur),
                 "EarlyStop": approx(self.early_stop)},
-            "Membership": list(membership),
-            "SymptomScores": list(symptoms),
-            "ExposureScores": list(exposures)})
+            "Membership": membership,
+            "SymptomScores": symptoms,
+            "ExposureScores": exposures})
 
     def _save_log(self) -> None:
         if (logger := self.logger) is not None:
