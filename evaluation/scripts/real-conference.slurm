@@ -14,15 +14,8 @@ SETTING="conference"
 module swap intel gcc
 module load python/$PYTHON_VERSION
 
-export PYTHONUSERBASE=$HOME/.usr/local/python/$PYTHON_VERSION
-mkdir -p $PYTHONUSERBASE
-
 cp ~/$PACKAGE $PFSDIR
 cd $PFSDIR
-
-pip install --upgrade pip
-pip install -r ~/$PACKAGE/requirements.txt --user
-pip install -e ~/$PACKAGE
 
 cd ~/$PACKAGE/evaluation
 
