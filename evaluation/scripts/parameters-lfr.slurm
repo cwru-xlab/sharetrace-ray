@@ -11,6 +11,8 @@ PACKAGE="contact-tracing"
 TYPE="parameters"
 GRAPH="lfr"
 
+module load python/$PYTHON_VERSION
+
 cp $HOME/$PACKAGE $PFSDIR
 cd $PFSDIR
 cd $HOME/$PACKAGE/evaluation

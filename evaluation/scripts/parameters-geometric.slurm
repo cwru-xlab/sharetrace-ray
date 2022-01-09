@@ -11,6 +11,8 @@ PACKAGE="contact-tracing"
 TYPE="parameters"
 GRAPH="geometric"
 
+module load python/$PYTHON_VERSION
+
 cp $HOME/$PACKAGE $PFSDIR
 cd $PFSDIR
 cd $HOME/$PACKAGE/evaluation
