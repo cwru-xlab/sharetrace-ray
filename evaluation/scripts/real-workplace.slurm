@@ -28,5 +28,3 @@ cd ~/$PACKAGE/evaluation
 
 python3 evaluate.py $TYPE \
     --setting $SETTING --path data/$SETTING.txt --seed 12345
-
-cp logs/$TYPE/$SETTING-* ~/$PACKAGE/evaluation/logs/$TYPE

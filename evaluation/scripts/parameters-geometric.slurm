@@ -27,5 +27,3 @@ pip install -e ~/$PACKAGE
 cd ~/$PACKAGE/evaluation
 
 python3 evaluate.py $TYPE --graph $GRAPH --seed 12345
-
-cp logs/$TYPE/$GRAPH-* ~/$PACKAGE/evaluation/logs/$TYPE
