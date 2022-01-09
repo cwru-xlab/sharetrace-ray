@@ -7,14 +7,16 @@ import pathlib
 import pprint
 import time
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Sequence
 
 import igraph as ig
 import networkx as nx
 import numpy as np
 import tqdm
 
+from evaluation import reachability
 from sharetrace import model, propagation
+from sharetrace.propagation import RiskPropagation
 from synthetic import (ContactFactory, DataFactory, Dataset, DatasetFactory,
                        ScoreFactory, SocioPatternsContactFactory,
                        SocioPatternsDatasetFactory, SocioPatternsScoreFactory,
@@ -306,6 +308,62 @@ class RealWorldExperiments:
     @staticmethod
     def _logfile(setting: str, ext: str) -> str:
         return f"{setting}-{round(time.time())}.{ext}"
+
+
+class GraphMetricsRiskPropagation(RiskPropagation):
+    __slots__ = ("graph",)
+
+    def __init__(self, graph: ig.Graph, **kwargs):
+        super().__init__(**kwargs)
+        self.graph = graph
+
+    def _run(self, scores, contacts):
+        self._log_graph_stats(scores, contacts)
+        return super()._run(scores, contacts)
+
+    def _log_graph_stats(self, scores, contacts):
+        reach = reachability.MessageReachability(
+            transmission=self.transmission,
+            tol=self.tol,
+            buffer=self.time_buffer,
+            workers=4)
+        reached = reach.run_all(scores, contacts)
+        reaches = itertools.chain(*(n.values() for n in reached.values()))
+        reaches = np.array(list(reaches))
+        edges = len(self.graph.es)
+        nodes = len(self.graph.vs)
+        reach_stats = self._basic_stats(reaches)
+        min_reached, max_reached, avg_reached, std_reached = reach_stats
+        deg_stats = self._basic_stats(degrees := self.graph.degree())
+        min_deg, max_deg, avg_deg, std_deg = deg_stats
+        effs = self.graph.harmonic_centrality(mode="all", normalized=True)
+        eff_stats = self._basic_stats(effs)
+        min_eff, max_eff, avg_eff, std_eff = eff_stats
+        self.log["Statistics"].update({
+            "MinMessageReachability": min_reached,
+            "MaxMessageReachability": max_reached,
+            "AvgMessageReachability": avg_reached,
+            "StdMessageReachability": std_reached,
+            "MessagesReachabilities": reaches.tolist(),
+            "ReachabilityRatio": reachability.ratio(reached, edges),
+            "GraphRadius": self.graph.radius(mode="all"),
+            "GraphDiameter": self.graph.diameter(directed=False, unconn=True),
+            "MinGraphDegree": min_deg,
+            "MaxGraphDegree": max_deg,
+            "AvgGraphDegree": avg_deg,
+            "StdGraphDegree": std_deg,
+            "Degrees": degrees,
+            "MinGraphEfficiency": min_eff,
+            "MaxGraphEfficiency": max_eff,
+            "AvgGraphEfficiency": avg_eff,
+            "StdGraphEfficiency": std_eff,
+            "Efficiencies": effs,
+            "TemporalEfficiency": sum(1 / reaches) / (nodes * (nodes - 1))})
+
+    @staticmethod
+    def _basic_stats(data) -> Sequence[float]:
+        ops = (np.min, np.max, np.mean, np.std)
+        return [float(op(data)) for op in ops]
 
 
 def parse_scalability_exps(args: argparse.Namespace) -> None:

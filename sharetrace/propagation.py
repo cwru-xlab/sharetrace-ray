@@ -458,7 +458,7 @@ class RiskPropagation(ActorSystem):
         exposures = self._gather(results, u2i, no_ne)
         self._log(
             graph=graph,
-            build_time=build_runtime,
+            build_runtime=build_runtime,
             partition_runtime=partition_runtime,
             worker_logs=[r.log for r in results],
             membership=n2p,
@@ -603,14 +603,14 @@ class RiskPropagation(ActorSystem):
             exposures: Iterable[float],
             graph: Graph,
             membership: Iterable[int],
-            build_time: float,
+            build_runtime: float,
             partition_runtime: float,
             worker_logs: Collection[WorkerLog]):
         approx = util.approx
         self.log.update({
             "Statistics": {
                 "GraphSizeInMb": approx(util.get_mb(graph)),
-                "GraphBuildTimeInSeconds": approx(build_time),
+                "GraphBuildTimeInSeconds": approx(build_runtime),
                 "PartitionTimeInSeconds": approx(partition_runtime),
                 "Nodes": int(self.nodes),
                 "Edges": int(self.edges),

@@ -15,9 +15,10 @@ from sharetrace import propagation
 ContactMap = Mapping[Tuple[int, int], float]
 AdjList = Mapping[int, Union[Sequence, np.ndarray]]
 Reached = Mapping[int, Mapping[int, int]]
+NpSeq = Sequence[np.ndarray]
 
 
-def reachability_ratio(reached: Reached, edges: int) -> float:
+def ratio(reached: Reached, edges: int) -> float:
     ckey = propagation.ckey
     actual = len(set(ckey(n, ne) for n, nes in reached.items() for ne in nes))
     ideal = edges
@@ -96,7 +97,7 @@ class MessageReachability:
         self.workers = workers
         self.verbose = verbose
 
-    def run_all(self, scores: np.ndarray, contacts: np.ndarray) -> Reached:
+    def run_all(self, scores: NpSeq, contacts: np.ndarray) -> Reached:
         """Computes message reachability for all users."""
         par = joblib.Parallel(self.workers, batch_size=1, verbose=self.verbose)
         contacts = self._to_map(contacts)
@@ -116,7 +117,7 @@ class MessageReachability:
     def run(
             self,
             sources: Iterable[int],
-            scores: np.ndarray,
+            scores: NpSeq,
             contacts: Union[np.ndarray, ContactMap],
             adjlist: Optional[AdjList] = None,
             precomputed: bool = False
@@ -152,7 +153,7 @@ class MessageReachability:
     def _initialize(
             self,
             source: int,
-            scores: np.ndarray
+            scores: NpSeq
     ) -> Tuple[List[Node], List[Node], Set[Node]]:
         initial = propagation.initial
         inits = (scores := np.array([initial(s) for s in scores])).copy()
