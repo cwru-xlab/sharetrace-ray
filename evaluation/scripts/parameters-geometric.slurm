@@ -2,12 +2,14 @@
 
 #SBATCH --time=8:00:00
 #SBATCH -p batch -A exa208 -N 1 -n 4 --mem=8gb
-#SBATCH --job-name="params-geometric"
+#SBATCH --job-name="p-geometric"
 #SBATCH --mail-user=rdt46@case.edu
 #SBATCH --mail-type=ALL
 
 PYTHON_VERSION="3.8.6"
 PACKAGE="contact-tracing"
+GRAPH="geometric"
+TYPE="parameters"
 
 module swap intel gcc
 module load python/$PYTHON_VERSION
@@ -24,7 +26,6 @@ pip install -e ~/$PACKAGE
 
 cd ~/$PACKAGE/evaluation
 
-python3 evaluate.py parameters --graph geometric --seed 12345
+python3 evaluate.py $TYPE --graph $GRAPH --seed 12345
 
-cp -ru * $SLURM_SUBMIT_DIR
-rm -rf "$PFSDIR"/*
+cp logs/$TYPE/$GRAPH-* $SLURM_SUBMIT_DIR
