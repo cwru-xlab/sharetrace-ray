@@ -24,7 +24,7 @@ pip install -e ~/$PACKAGE
 
 cd ~/$PACKAGE/evaluation
 
-python3 eval.py scalability --graph geometric --seed 12345
+python3 evaluate.py scalability --graph geometric --seed 12345
 
 cp -ru * $SLURM_SUBMIT_DIR
 rm -rf "$PFSDIR"/*

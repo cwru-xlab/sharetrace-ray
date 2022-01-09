@@ -24,7 +24,7 @@ pip install -e ~/$PACKAGE
 
 cd ~/$PACKAGE/evaluation
 
-python3 eval.py real \
+python3 evaluate.py real \
     --setting highschool12 --path data/highschool_2012.csv --seed 12345
 
 cp -ru * $SLURM_SUBMIT_DIR
