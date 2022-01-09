@@ -329,16 +329,15 @@ class GraphMetricsRiskPropagation(RiskPropagation):
             workers=4)
         reached = reach.run_all(scores, contacts)
         reaches = itertools.chain(*(n.values() for n in reached.values()))
-        reaches = np.array(list(reaches))
-        edges = len(self.graph.es)
-        nodes = len(self.graph.vs)
-        reach_stats = self._basic_stats(reaches)
+        reach_stats = self._basic_stats(reaches := np.array(list(reaches)))
         min_reached, max_reached, avg_reached, std_reached = reach_stats
         deg_stats = self._basic_stats(degrees := self.graph.degree())
         min_deg, max_deg, avg_deg, std_deg = deg_stats
         effs = self.graph.harmonic_centrality(mode="all", normalized=True)
         eff_stats = self._basic_stats(effs)
         min_eff, max_eff, avg_eff, std_eff = eff_stats
+        edges = len(self.graph.es)
+        nodes = len(self.graph.vs)
         self.log["Statistics"].update({
             "MinMessageReachability": min_reached,
             "MaxMessageReachability": max_reached,
@@ -346,17 +345,17 @@ class GraphMetricsRiskPropagation(RiskPropagation):
             "StdMessageReachability": std_reached,
             "MessagesReachabilities": reaches.tolist(),
             "ReachabilityRatio": reachability.ratio(reached, edges),
-            "GraphRadius": self.graph.radius(mode="all"),
-            "GraphDiameter": self.graph.diameter(directed=False, unconn=True),
-            "MinGraphDegree": min_deg,
-            "MaxGraphDegree": max_deg,
-            "AvgGraphDegree": avg_deg,
-            "StdGraphDegree": std_deg,
+            "Radius": self.graph.radius(mode="all"),
+            "Diameter": self.graph.diameter(directed=False, unconn=True),
+            "MinDegree": min_deg,
+            "MaxDegree": max_deg,
+            "AvgDegree": avg_deg,
+            "StdDegree": std_deg,
             "Degrees": degrees,
-            "MinGraphEfficiency": min_eff,
-            "MaxGraphEfficiency": max_eff,
-            "AvgGraphEfficiency": avg_eff,
-            "StdGraphEfficiency": std_eff,
+            "MinEfficiency": min_eff,
+            "MaxEfficiency": max_eff,
+            "AvgEfficiency": avg_eff,
+            "StdEfficiency": std_eff,
             "Efficiencies": effs,
             "TemporalEfficiency": sum(1 / reaches) / (nodes * (nodes - 1))})
 
