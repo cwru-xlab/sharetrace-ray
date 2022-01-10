@@ -213,10 +213,10 @@ class _Partition(Actor):
         if (max_dur := self.max_dur) is not None:
             if too_long := ((timeit.default_timer() - self._start) >= max_dur):
                 self._stop_condition = StopCondition.MAX_DURATION.data(max_dur)
-        elif (early_stop := self.early_stop) is not None:
+        if (early_stop := self.early_stop) is not None:
             if no_updates := (self._since_update >= early_stop):
                 self._stop_condition = StopCondition.EARLY_STOP.data(early_stop)
-        elif self._timed_out:
+        if self._timed_out:
             self._stop_condition = StopCondition.TIMED_OUT.data(self.timeout)
         return self._timed_out or too_long or no_updates
 
