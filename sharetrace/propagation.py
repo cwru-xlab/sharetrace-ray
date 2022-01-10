@@ -39,6 +39,10 @@ def ckey(n1: int, n2: int) -> Tuple[int, int]:
     return min(n1, n2), max(n1, n2)
 
 
+def is_whole(x):
+    return x % 1 == 0
+
+
 def initial(scores: Array) -> np.void:
     return np.sort(scores, order=("val", "time"))[-1]
 
@@ -412,18 +416,18 @@ class RiskPropagation(ActorSystem):
             early_stop,
             partitioning
     ) -> None:
-        assert isinstance(time_buffer, int) and time_buffer > 0
-        assert isinstance(time_const, Real) and time_const > 0
-        assert isinstance(transmission, Real) and 0 < transmission <= 1
-        assert isinstance(tol, Real) and tol >= 0
-        assert isinstance(eps, Real) and eps > 0
-        assert isinstance(workers, int) and workers > 0
+        assert is_whole(time_buffer) and time_buffer > 0
+        assert time_const > 0
+        assert 0 < transmission <= 1
+        assert tol >= 0
+        assert eps > 0
+        assert is_whole(workers) and workers > 0
         if timeout is not None:
-            assert isinstance(timeout, Real) and timeout >= 0
+            assert timeout >= 0
         if max_dur is not None:
-            assert isinstance(max_dur, Real) and max_dur > 0
+            assert max_dur > 0
         if early_stop is not None:
-            assert isinstance(early_stop, int) and early_stop > 0
+            assert is_whole(early_stop) and early_stop > 0
         assert partitioning in ("metis", "spectral")
 
     def send(self, parts: Sequence[NpMap]) -> None:
