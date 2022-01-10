@@ -14,12 +14,10 @@ SETTING="workplace"
 module swap intel gcc
 module load python/$PYTHON_VERSION
 
-python3 -m pip install --upgrade pip
-python3 -m pip install -r $HOME/$PACKAGE/requirements.txt --user
-python3 -m pip install -e $HOME/$PACKAGE
-
 cp -r $HOME/$PACKAGE $PFSDIR
 cd $PFSDIR/$PACKAGE/evaluation
 
 python3 evaluate.py $TYPE \
     --setting $SETTING --path data/$SETTING.txt --seed 12345
+
+cp -r logs/$TYPE/$SETTING* $HOME/$PACKAGE/evaluation/logs/$TYPE
