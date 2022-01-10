@@ -56,7 +56,7 @@ class UniformBernoulliValueFactory(DataFactory):
     def __call__(self, n: int, **kwargs) -> np.ndarray:
         rng = self._rng
         per_user = self.per_user
-        indicator = stats.bernoulli.rvs(self.p, size=n)
+        indicator = stats.bernoulli.rvs(self.p, size=n).astype(np.int8)
         replace = np.flatnonzero(indicator)
         values = rng.uniform(0, 0.5, size=(n, per_user))
         values[replace] = rng.uniform(0.5, 1, size=(len(replace), per_user))
@@ -372,8 +372,8 @@ class ContactFactory(DataFactory):
         ts = self.time_factory(len(edges := graph.es), **kwargs)
         es = (e.tuple for e in edges)
         contact = model.contact
-        return np.array([
-            contact((n1, n2), t) for (n1, n2), t in zip(es, ts) if n1 != n2])
+        # Assumes that the graph does not contain self loops.
+        return np.array([contact((n1, n2), t) for (n1, n2), t in zip(es, ts)])
 
 
 class CachedGraphFactory(DataFactory):

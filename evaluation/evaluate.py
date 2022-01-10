@@ -52,8 +52,11 @@ def model_object_sizes():
     pprint.pprint(objects, indent=1)
 
 
-def filter_isolated(g: ig.Graph) -> ig.Graph:
-    return g.subgraph(g.vs.select(_degree_gt=0))
+def prune(g: ig.Graph) -> ig.Graph:
+    """Remove isolated nodes and simplify the graph."""
+    pruned = g.subgraph(g.vs.select(_degree_gt=0))
+    pruned.simplify(combine_edges="max")
+    return pruned
 
 
 def create_sociopatterns_data(
@@ -100,7 +103,7 @@ def create_synthetic_data(
 def geometric_graph(n: int, seed=None) -> ig.Graph:
     graph = nx.generators.random_geometric_graph(
         n, radius=geometric_radius(n), seed=seed)
-    return filter_isolated(ig.Graph.from_networkx(graph))
+    return prune(ig.Graph.from_networkx(graph))
 
 
 def geometric_radius(n: int) -> float:
@@ -109,7 +112,7 @@ def geometric_radius(n: int) -> float:
 
 def scale_free_cluster_graph(n: int, seed=None) -> ig.Graph:
     graph = nx.generators.powerlaw_cluster_graph(n, m=2, p=0.95, seed=seed)
-    return filter_isolated(ig.Graph.from_networkx(graph))
+    return prune(ig.Graph.from_networkx(graph))
 
 
 def lfr_graph(n: int, seed=None) -> ig.Graph:
@@ -123,8 +126,7 @@ def lfr_graph(n: int, seed=None) -> ig.Graph:
         min_community=10,
         max_community=100,
         seed=seed)
-    # Wrap with filter_isolated() if min_degree < 2
-    return ig.Graph.from_networkx(graph)
+    return prune(ig.Graph.from_networkx(graph))
 
 
 def get_logger(directory: str, logfile: str) -> logging.Logger:
@@ -206,6 +208,7 @@ class ScalabilityExperiments(SyntheticExperiments):
                     "tol": 0.3,
                     "workers": w,
                     "timeout": 0 if w == 1 else 5,
+                    "early_stop": users * 10,
                     "logger": logger}
                 if log_metrics:
                     graph = dataset.graph
@@ -244,8 +247,9 @@ class ParameterExperiments(SyntheticExperiments):
         logger = get_logger(PARAMS_DIR, self._logfile(graph_name, "log"))
         # transmission = 1 never terminates because of no decay.
         loop = list(itertools.product(range(1, 11), range(1, 10)))
+        users = 5000
         dataset = create_synthetic_data(
-            users=5_000,
+            users=users,
             graph_factory=graph_factory,
             days=15,
             p=0.2,
@@ -256,6 +260,7 @@ class ParameterExperiments(SyntheticExperiments):
                 transmission=transmission / 10,
                 workers=2,
                 timeout=5,
+                early_stop=10 * users,
                 logger=logger)
             risk_prop.run(dataset.scores, dataset.contacts)
 
