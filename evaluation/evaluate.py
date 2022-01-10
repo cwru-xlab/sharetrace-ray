@@ -208,7 +208,7 @@ class ScalabilityExperiments(SyntheticExperiments):
                     "tol": 0.3,
                     "workers": w,
                     "timeout": 0 if w == 1 else 5,
-                    "early_stop": users * 10,
+                    "early_stop": u * 10,
                     "logger": logger}
                 if log_metrics:
                     graph = dataset.graph
