@@ -184,7 +184,7 @@ class MessageReachability:
             node = pop(heap)
             if (msg := node.msg) is not None:
                 name, dist, init = node.name, node.dist, node.init
-                for n in get_ne(name, default=[]):
+                for n in get_ne(name, []):
                     ne = nodes[n]
                     if msg["time"] <= contacts[ckey(name, ne.name)] + buffer:
                         send = msg.copy()
