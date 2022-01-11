@@ -220,9 +220,9 @@ class ScalabilityExperiments(SyntheticExperiments):
 
     @staticmethod
     def _workers(users: int):
-        if 200 <= users <= 1000:
+        if 100 <= users < 1000:
             workers = (1, 2)
-        elif 2000 <= users <= 10000:
+        elif 1000 <= users < 10000:
             workers = (2, 4)
         else:
             workers = (4, 8)
