@@ -205,7 +205,7 @@ class ScalabilityExperiments(SyntheticExperiments):
             scores, contacts = dataset.scores, dataset.contacts
             for w in self._workers(u):
                 kwargs = {
-                    "tol": 0.3,
+                    "tol": 0.6,
                     "workers": w,
                     "timeout": 0 if w == 1 else 5,
                     "early_stop": u * 10,
@@ -316,7 +316,7 @@ class RealWorldExperiments:
                 graph_path=graph_path,
                 seed=self.seed)
             risk_prop = GraphMetricsRiskPropagation(
-                dataset.graph, tol=0.3, workers=1, timeout=0, logger=logger)
+                dataset.graph, tol=0.6, workers=1, timeout=0, logger=logger)
             risk_prop.run(dataset.scores, dataset.contacts)
 
     @staticmethod
