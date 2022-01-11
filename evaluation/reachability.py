@@ -6,6 +6,7 @@ import heapq
 from typing import (
     Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union)
 
+import igraph as ig
 import joblib
 import numpy as np
 
@@ -17,11 +18,11 @@ Reached = Mapping[int, Mapping[int, int]]
 NpSeq = Sequence[np.ndarray]
 
 
-def ratio(reached: Reached, edges: int) -> float:
+def ratio(reached: Reached, graph: ig.Graph) -> Tuple[float, int, int]:
     ckey = propagation.ckey
     actual = len(set(ckey(n, ne) for n, nes in reached.items() for ne in nes))
-    ideal = edges
-    return actual / ideal
+    ideal = np.count_nonzero(graph.shortest_paths())
+    return actual / ideal, actual, ideal
 
 
 class Node:
@@ -191,10 +192,9 @@ class MessageReachability:
                         send["val"] *= transmission
                         high_enough = send["val"] >= init["val"] * tol
                         old_enough = send["time"] <= init["time"]
-                        if high_enough and old_enough:
-                            if ne.dist > (new := dist + 1):
-                                ne.dist = new
-                            ne.msg = send
+                        closer = ne.dist > (new := dist + 1)
+                        if high_enough and old_enough and closer:
+                            ne.dist, ne.msg = new, send
                             add(ne)
 
     def copy(self) -> MessageReachability:

@@ -345,22 +345,25 @@ class GraphMetricsRiskPropagation(RiskPropagation):
             buffer=self.time_buffer,
             workers=4)
         reached = reach.run_all(scores, contacts)
+        ratio, _, ideal = reachability.ratio(reached, graph)
         reaches = itertools.chain(*(n.values() for n in reached.values()))
-        reach_stats = self._basic_stats(reaches := np.array(list(reaches)))
-        min_reached, max_reached, avg_reached, std_reached = reach_stats
-        deg_stats = self._basic_stats(degrees := graph.degree())
-        min_deg, max_deg, avg_deg, std_deg = deg_stats
+        reaches = np.array(list(reaches), dtype=np.int8)
+        unreached = np.zeros(ideal - len(reaches), dtype=np.int8)
+        reaches = np.concatenate([reaches, unreached])
         effs = graph.harmonic_centrality(mode="all", normalized=True)
+        reach_stats = self._basic_stats(reaches)
+        deg_stats = self._basic_stats(degrees := graph.degree())
         eff_stats = self._basic_stats(effs)
+        min_reached, max_reached, avg_reached, std_reached = reach_stats
+        min_deg, max_deg, avg_deg, std_deg = deg_stats
         min_eff, max_eff, avg_eff, std_eff = eff_stats
-        edges = len(graph.es)
         self.log["Statistics"].update({
             "MinMessageReachability": min_reached,
             "MaxMessageReachability": max_reached,
             "AvgMessageReachability": avg_reached,
             "StdMessageReachability": std_reached,
             "MessagesReachabilities": reaches.tolist(),
-            "ReachabilityRatio": approx(reachability.ratio(reached, edges)),
+            "ReachabilityRatio": approx(ratio),
             "Radius": graph.radius(mode="all"),
             "Diameter": graph.diameter(directed=False, unconn=True),
             "MinDegree": min_deg,
