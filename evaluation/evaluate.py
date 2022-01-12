@@ -201,31 +201,23 @@ class ScalabilityExperiments(SyntheticExperiments):
                 days=15,
                 p=0.2,
                 seed=self.seed)
-            log_metrics = True
-            scores, contacts = dataset.scores, dataset.contacts
-            for w in self._workers(u):
-                kwargs = {
-                    "tol": 0.6,
-                    "workers": w,
-                    "timeout": 0 if w == 1 else 5,
-                    "early_stop": u * 10,
-                    "logger": logger}
-                if log_metrics:
-                    graph = dataset.graph
-                    risk_prop = GraphMetricsRiskPropagation(graph, **kwargs)
-                    log_metrics = False
-                else:
-                    risk_prop = propagation.RiskPropagation(**kwargs)
-                risk_prop.run(scores, contacts)
+            risk_prop = GraphMetricsRiskPropagation(
+                dataset.graph,
+                tol=0.6,
+                workers=(w := self._workers(u)),
+                timeout=0 if w == 1 else 5,
+                early_stop=u * 10,
+                logger=logger)
+            risk_prop.run(dataset.scores, dataset.contacts)
 
     @staticmethod
-    def _workers(users: int):
+    def _workers(users: int) -> int:
         if 100 <= users < 1000:
-            workers = (1,)
+            workers = 1
         elif 1000 <= users < 10000:
-            workers = (2,)
+            workers = 2
         else:
-            workers = (4,)
+            workers = 4
         return workers
 
     @staticmethod
