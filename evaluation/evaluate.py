@@ -208,6 +208,7 @@ class ScalabilityExperiments(SyntheticExperiments):
                 timeout=0 if w == 1 else 3,
                 early_stop=u * 10,
                 logger=logger,
+                max_dur=3600,
                 seed=self.seed)
             risk_prop.run(dataset.scores, dataset.contacts)
 
