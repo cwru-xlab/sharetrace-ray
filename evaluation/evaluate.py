@@ -205,7 +205,7 @@ class ScalabilityExperiments(SyntheticExperiments):
                 dataset.graph,
                 tol=0.6,
                 workers=(w := self._workers(u)),
-                timeout=0 if w == 1 else 5,
+                timeout=0 if w == 1 else 3,
                 early_stop=u * 10,
                 logger=logger)
             risk_prop.run(dataset.scores, dataset.contacts)
