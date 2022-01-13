@@ -297,6 +297,7 @@ int CheckParams(ctrl_t *ctrl)
         return 0;
       }
       if (ctrl->ctype != METIS_CTYPE_RM && ctrl->ctype != METIS_CTYPE_SHEM) {
+        printf(ctype);
         IFSET(dbglvl, METIS_DBG_INFO, printf("Input Error: Incorrect coarsening scheme.\n"));
         return 0;
       }

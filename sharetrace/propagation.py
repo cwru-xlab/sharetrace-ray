@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import (
     Any, Collection, Hashable, Iterable, List, Mapping, MutableMapping,
-    Optional,
-    Sequence, Set, Tuple, Type, Union
+    Optional, Sequence, Set, Tuple, Type, Union
 )
 
 import metis
@@ -30,7 +29,6 @@ Graph = MutableMapping[Hashable, Any]
 Nodes = Mapping[int, np.void]
 Index = Union[Mapping[int, int], Sequence[int], np.ndarray]
 Log = MutableMapping[str, Any]
-Real = (int, float)
 
 ACTOR_SYSTEM = -1
 
@@ -553,8 +551,8 @@ class RiskPropagation(ActorSystem):
     def _metis_partition(self, adjlist: Sequence) -> Array:
         # Ref: http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/manual.pdf
         if (seed := self.seed) is None:
-            # metis does not allow None for the seed; 1e9 < 32-bits.
-            seed = np.random.default_rng().integers(1e9)
+            # metis does not allow None for the seed; 1e8 < 32-bits.
+            seed = np.random.default_rng().integers(1e8)
         _, labels = metis.part_graph(
             graph=adjlist,
             nparts=self.workers,
