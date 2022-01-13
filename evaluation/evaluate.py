@@ -15,7 +15,7 @@ import numpy as np
 import tqdm
 
 from evaluation import reachability
-from sharetrace import model, propagation, util
+from sharetrace import model, util
 from sharetrace.propagation import RiskPropagation
 from synthetic import (CachedGraphFactory, ContactFactory, DataFactory, Dataset,
                        DatasetFactory, ScoreFactory,
@@ -247,11 +247,12 @@ class ParameterExperiments(SyntheticExperiments):
             p=0.2,
             seed=self.seed)
         for tol, transmission in tqdm.tqdm(loop):
-            risk_prop = propagation.RiskPropagation(
+            risk_prop = GraphMetricsRiskPropagation(
+                dataset.graph,
                 tol=tol / 10,
                 transmission=transmission / 10,
-                workers=2,
-                timeout=5,
+                workers=1,
+                timeout=0,
                 early_stop=10 * users,
                 logger=logger)
             risk_prop.run(dataset.scores, dataset.contacts)
