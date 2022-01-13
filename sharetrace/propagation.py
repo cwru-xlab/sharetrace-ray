@@ -12,10 +12,9 @@ from typing import (
     Optional, Sequence, Set, Tuple, Type, Union
 )
 
-import metis
 import numpy as np
+import pymetis
 import ray
-from ray import ObjectRef
 from scipy import sparse
 from sklearn import cluster
 
@@ -128,7 +127,7 @@ class Partition(Actor):
         super().__init__(name, mailbox)
         self._actor = _Partition.remote(name, mailbox=mailbox, **kwargs)
 
-    def run(self) -> ObjectRef:
+    def run(self) -> ray.ObjectRef:
         # Do not block to allow asynchronous invocation of actors.
         return self._actor.run.remote()
 
@@ -542,10 +541,10 @@ class RiskPropagation(ActorSystem):
         return n2p, timed.seconds
 
     def partition(self, adjlist: Sequence, n2i: Index) -> Array:
-        if self.partitioning == "spectral":
-            labels = self._spectral_partition(adjlist, n2i)
-        else:
+        if self.partitioning == "metis":
             labels = self._metis_partition(adjlist)
+        else:
+            labels = self._spectral_partition(adjlist, n2i)
         return labels
 
     def _metis_partition(self, adjlist: Sequence) -> Array:
@@ -553,22 +552,20 @@ class RiskPropagation(ActorSystem):
         if (seed := self.seed) is None:
             # metis does not allow None for the seed; 1e8 < 32-bits.
             seed = np.random.default_rng().integers(1e8)
-        _, labels = metis.part_graph(
-            graph=adjlist,
+        _, labels = pymetis.part_graph(
             nparts=self.workers,
-            recursive=False,  # default: False
-            objtype="cut",  # default: "cut"
-            ctype="shem",  # default: "shem"
-            ncuts=1,  # default: 1
-            niter=10,  # default: 10
-            ufactor=50,  # default: 30
-            minconn=False,  # default: False
-            contig=True,  # default: False
-            seed=seed,
-            numbering=0,
-            dbglvl=0)  # default = 0
-        # Indexing starts at 1 if workers = 1; expected is 0 always.
-        return np.array(labels) - (self.workers == 1)
+            adjacency=adjlist,
+            recursive=False,
+            options=pymetis.Options(
+                ncuts=1,  # default: 1
+                niter=10,  # default: 10
+                ufactor=50,  # default: 30
+                minconn=False,  # default: False
+                contig=True,  # default: False
+                numbering=0,
+                seed=seed,
+                no2hop=False))
+        return np.array(labels)
 
     def _spectral_partition(self, adjlist: Sequence, n2i: Index) -> Array:
         # Ignore warning regarding disconnected graph.
@@ -587,13 +584,13 @@ class RiskPropagation(ActorSystem):
             adjmat[n2i[n], ne] = 1
         return adjmat.tocsr()
 
-    def _connect(self, graph: ObjectRef) -> None:
+    def _connect(self, graph: ray.ObjectRef) -> None:
         create_part, workers = self._create_part, self.workers
         parts = (create_part(w, graph) for w in range(workers))
         pairs = parts if workers == 1 else itertools.combinations(parts, 2)
         self.connect(*pairs, duplex=True)
 
-    def _create_part(self, name: int, graph: ObjectRef) -> Partition:
+    def _create_part(self, name: int, graph: ray.ObjectRef) -> Partition:
         # Ray Queue must be created and then passed as an object reference.
         return Partition(
             name=name,
