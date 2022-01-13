@@ -13,8 +13,8 @@ from typing import (
     Sequence, Set, Tuple, Type, Union
 )
 
+import metis
 import numpy as np
-import pymetis
 import ray
 from ray import ObjectRef
 from scipy import sparse
@@ -149,6 +149,7 @@ class _Partition(Actor):
         "tol",
         "eps",
         "empty",
+        "full",
         "timeout",
         "max_dur",
         "early_stop",
@@ -171,6 +172,7 @@ class _Partition(Actor):
             transmission: float,
             tol: float,
             empty: Type,
+            full: Type,
             eps: float,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
@@ -183,6 +185,7 @@ class _Partition(Actor):
         self.tol = tol
         self.eps = eps
         self.empty = empty
+        self.full = full
         self.timeout = timeout
         self.max_dur = max_dur
         self.early_stop = early_stop
@@ -309,14 +312,21 @@ class _Partition(Actor):
                 # The conjunction of the first criterion allows for convergence.
                 old_enough = score["time"] <= init["time"]
                 if high_enough and old_enough:
+                    dgroup = graph[f]["group"]
                     # noinspection PyTypeChecker
-                    send(message(score, var, sgroup, f, graph[f]["group"]))
+                    if not send(message(score, var, sgroup, f, dgroup)):
+                        break
 
-    def send(self, msg: np.void) -> None:
+    def send(self, msg: np.void) -> bool:
+        sent = True
         if (key := msg["dgroup"]) == self.name:
             self._local.append(msg)
         else:
-            self.neighbors[key].put_nowait(msg)
+            try:
+                self.neighbors[key].put(msg, block=True, timeout=self.timeout)
+            except self.full:
+                self._timed_out, sent = True, False
+        return sent
 
     def _log(self, runtime: float) -> WorkerLog:
         def safe_stat(func, values):
@@ -354,10 +364,12 @@ class RiskPropagation(ActorSystem):
         "tol",
         "eps",
         "workers",
+        "partitioning",
+        "max_size",
         "timeout",
         "max_dur",
         "early_stop",
-        "partitioning",
+        "seed",
         "logger",
         "nodes",
         "edges",
@@ -371,10 +383,12 @@ class RiskPropagation(ActorSystem):
             tol: float = 0.1,
             eps: float = 1e-7,
             workers: int = 1,
+            partitioning: str = "metis",
+            max_size: Optional[int] = 10_000_000,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None,
-            partitioning: str = "spectral",
+            seed: Optional[int] = None,
             logger: Optional[logging.Logger] = None):
         super().__init__(ACTOR_SYSTEM)
         self._check_params(
@@ -386,17 +400,20 @@ class RiskPropagation(ActorSystem):
             timeout=timeout,
             max_dur=max_dur,
             early_stop=early_stop,
-            partitioning=partitioning)
+            partitioning=partitioning,
+            max_size=max_size)
         self.time_buffer = time_buffer
         self.time_const = time_const
         self.transmission = transmission
         self.tol = tol
         self.eps = eps
         self.workers = workers
+        self.partitioning = partitioning
+        self.max_size = max_size
         self.timeout = timeout
         self.max_dur = max_dur
         self.early_stop = early_stop
-        self.partitioning = partitioning
+        self.seed = seed
         self.logger = logger
         self.nodes: int = -1
         self.edges: int = -1
@@ -414,7 +431,8 @@ class RiskPropagation(ActorSystem):
             timeout,
             max_dur,
             early_stop,
-            partitioning
+            partitioning,
+            max_size
     ) -> None:
         assert is_whole(time_buffer) and time_buffer > 0
         assert time_const > 0
@@ -429,6 +447,8 @@ class RiskPropagation(ActorSystem):
         if early_stop is not None:
             assert is_whole(early_stop) and early_stop > 0
         assert partitioning in ("metis", "spectral")
+        if max_size is not None:
+            assert is_whole(max_size)
 
     def send(self, parts: Sequence[NpMap]) -> None:
         neighbors = self.neighbors
@@ -531,14 +551,32 @@ class RiskPropagation(ActorSystem):
         return labels
 
     def _metis_partition(self, adjlist: Sequence) -> Array:
-        _, labels = pymetis.part_graph(self.workers, adjlist)
-        return labels
+        # Ref: http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/manual.pdf
+        if (seed := self.seed) is None:
+            # metis does not allow None for the seed; 1e9 < 32-bits.
+            seed = np.random.default_rng().integers(1e9)
+        _, labels = metis.part_graph(
+            graph=adjlist,
+            nparts=self.workers,
+            recursive=False,  # default: False
+            objtype="cut",  # default: "cut"
+            ctype="shem",  # default: "shem"
+            ncuts=1,  # default: 1
+            niter=10,  # default: 10
+            ufactor=50,  # default: 30
+            minconn=False,  # default: False
+            contig=True,  # default: False
+            seed=seed,
+            numbering=0,
+            dbglvl=0)  # default = 0
+        # Indexing starts at 1 if workers = 1; expected is 0 always.
+        return np.array(labels) - (self.workers == 1)
 
     def _spectral_partition(self, adjlist: Sequence, n2i: Index) -> Array:
         # Ignore warning regarding disconnected graph.
         warnings.filterwarnings("ignore")
         spectral = cluster.SpectralClustering(
-            self.workers,
+            n_clusters=self.workers,
             n_init=100,
             affinity="precomputed",
             assign_labels="discretize")
@@ -561,7 +599,7 @@ class RiskPropagation(ActorSystem):
         # Ray Queue must be created and then passed as an object reference.
         return Partition(
             name=name,
-            mailbox=queue.Queue(),
+            mailbox=queue.Queue(0 if self.max_size is None else self.max_size),
             graph=graph,
             time_buffer=self.time_buffer,
             time_const=self.time_const,
@@ -569,6 +607,7 @@ class RiskPropagation(ActorSystem):
             tol=self.tol,
             eps=self.eps,
             empty=queue.Empty,
+            full=queue.Full,
             timeout=self.timeout,
             max_dur=self.max_dur,
             early_stop=self.early_stop)
