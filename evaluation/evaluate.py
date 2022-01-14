@@ -253,8 +253,8 @@ class ParameterExperiments(SyntheticExperiments):
                 dataset.graph,
                 tol=tol / 10,
                 transmission=transmission / 10,
-                workers=1,
-                timeout=0,
+                workers=2,
+                timeout=3,
                 early_stop=10 * users,
                 logger=logger,
                 seed=self.seed)
