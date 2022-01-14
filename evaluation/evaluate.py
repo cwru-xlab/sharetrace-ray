@@ -187,7 +187,7 @@ class ScalabilityExperiments(SyntheticExperiments):
     def _benchmark(self, graph_factory: DataFactory, graph_name: str) -> None:
         logger = get_logger(SCALABILITY_DIR, self._logfile(graph_name, "log"))
         rng = np.arange(1, 11)
-        users = np.concatenate([rng * (10 ** p) for p in range(2, 5)])
+        users = np.concatenate([rng * (10 ** p) for p in range(2, 4)])
         for u in tqdm.tqdm(users):
             if u in (100, 1000, 10000):
                 graph_path = os.path.join(
