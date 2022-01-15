@@ -349,8 +349,6 @@ class GraphMetricsRiskPropagation(RiskPropagation):
         ratio, _, ideal = reachability.ratio(reached, graph)
         reaches = itertools.chain(*(n.values() for n in reached.values()))
         reaches = np.array(list(reaches), dtype=np.int8)
-        unreached = np.zeros(ideal - len(reaches), dtype=np.int8)
-        reaches = np.concatenate([reaches, unreached])
         effs = graph.harmonic_centrality(mode="all", normalized=True)
         reach_stats = self._basic_stats(reaches)
         deg_stats = self._basic_stats(degrees := graph.degree())
