@@ -5,6 +5,8 @@ scipy~=1.7.1
 scikit-learn~=1.0.1
 pygeohash~=1.2.0
 pyproj~=3.2.1
-pymetis~=2020.1
-ray~=1.8.0
+ray[default]~=1.8.0
 tqdm~=4.62.3
+igraph~=0.9.8
+networkx~=2.6.3
+# BLANK END-OF-FILE LINE REQUIRED (DO NOT REMOVE)

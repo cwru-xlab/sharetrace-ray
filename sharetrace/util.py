@@ -1,66 +1,11 @@
 from __future__ import annotations
 
-import datetime
 import inspect
-import logging
-import os
 import sys
 import timeit
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional
 
 import numpy as np
-
-TimeDelta = Union[datetime.timedelta, np.timedelta64]
-DateTime = Union[datetime.datetime, np.datetime64]
-
-LOGS_DIR = 'logs'
-LOGGERS = (
-    'contact-search',
-    'risk-propagation:serial',
-    'risk-propagation:lewicki',
-    'risk-propagation:ray',
-    'risk-propagation:tolerance')
-
-
-def logging_config(clear=False):
-    if clear and os.path.exists(LOGS_DIR):
-        os.rmdir(LOGS_DIR)
-    if not os.path.exists(LOGS_DIR):
-        os.mkdir(LOGS_DIR)
-
-    config = {
-        'version': 1,
-        'loggers': {
-            'root': {
-                'level': logging.INFO,
-                'handlers': ['console']
-            },
-        },
-        'handlers': {
-            'console': {
-                'class': 'logging.StreamHandler',
-                'level': logging.INFO,
-                'formatter': 'default',
-                'stream': sys.stdout,
-            }
-        },
-        'formatters': {
-            'default': {
-                'format': '%(asctime)s %(levelname)s %(module)s | %(message)s'
-            }
-        }
-    }
-    for logger in LOGGERS:
-        config['loggers'][logger] = {
-            'level': logging.INFO,
-            'handlers': [logger]}
-        config['handlers'][logger] = {
-            'class': 'logging.FileHandler',
-            'level': logging.INFO,
-            'formatter': 'default',
-            'mode': 'a',
-            'filename': f'{LOGS_DIR}//{logger}.log'}
-    return config
 
 
 def time(func: Callable[[], Any]) -> Timer:
@@ -68,7 +13,7 @@ def time(func: Callable[[], Any]) -> Timer:
 
 
 class Timer:
-    __slots__ = ('result', 'seconds')
+    __slots__ = ("result", "seconds")
 
     def __init__(self, result: Any, seconds: float):
         self.result = result
@@ -103,10 +48,10 @@ def get_bytes(obj, seen=None):
     if obj_id in seen:
         return 0
     seen.add(obj_id)
-    if hasattr(obj, '__dict__'):
+    if hasattr(obj, "__dict__"):
         for cls in obj.__class__.__mro__:
-            if '__dict__' in cls.__dict__:
-                d = cls.__dict__['__dict__']
+            if "__dict__" in cls.__dict__:
+                d = cls.__dict__["__dict__"]
                 gs_descriptor = inspect.isgetsetdescriptor(d)
                 m_descriptor = inspect.ismemberdescriptor(d)
                 if gs_descriptor or m_descriptor:
@@ -116,9 +61,9 @@ def get_bytes(obj, seen=None):
     if isinstance(obj, dict):
         size += sum((get_bytes(v, seen) for v in obj.values()))
         size += sum((get_bytes(k, seen) for k in obj.keys()))
-    elif hasattr(obj, '__iter__') and not any_str:
+    elif hasattr(obj, "__iter__") and not any_str:
         size += sum((get_bytes(i, seen) for i in obj))
-    if hasattr(obj, '__slots__'):
+    if hasattr(obj, "__slots__"):
         size += sum(
             get_bytes(getattr(obj, s), seen)
             for s in obj.__slots__
@@ -126,5 +71,11 @@ def get_bytes(obj, seen=None):
     return size
 
 
-def approx(val):
-    return val if val is None else round(float(val), 4)
+def approx(val: Optional, prec=4) -> Optional[float]:
+    """Approximates the value to given precision."""
+    return val if val is None else round(float(val), prec)
+
+
+def sdiv(a: float, b: float) -> float:
+    """Returns the quotient of a and b, or 0 if b is 0."""
+    return 0 if b == 0 else a / b
