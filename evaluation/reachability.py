@@ -159,12 +159,9 @@ class MessageReachability:
         inits = (scores := np.array([initial(s) for s in scores])).copy()
         inits["val"] *= self.transmission
         nodes = []
-        append = nodes.append
-        for n in range(source):
-            append(Node(n, init=inits[n]))
-        append(Node(source, dist=0, msg=scores[source], init=inits[source]))
-        for n in range(source + 1, len(scores)):
-            append(Node(n, init=inits[n]))
+        nodes.extend(Node(n, inits[n]) for n in range(source))
+        nodes.append(Node(source, inits[source], dist=0, msg=scores[source]))
+        nodes.extend(Node(n, inits[n]) for n in range(source + 1, len(scores)))
         heapq.heapify(heap := nodes.copy())
         reached = set()
         return nodes, heap, reached
