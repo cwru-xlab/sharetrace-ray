@@ -15,7 +15,7 @@ import numpy as np
 import tqdm
 
 from evaluation import reachability
-from sharetrace import model, util
+from sharetrace import model, propagation, util
 from sharetrace.propagation import RiskPropagation
 from synthetic import (CachedGraphFactory, ContactFactory, DataFactory, Dataset,
                        DatasetFactory, ScoreFactory,
@@ -179,38 +179,46 @@ class SyntheticExperiments(ABC):
 
 # noinspection PyTypeChecker
 class ScalabilityExperiments(SyntheticExperiments):
-    __slots__ = ()
+    __slots__ = ("start", "stop", "step")
 
-    def __init__(self, seed=None):
+    def __init__(self, start=0, stop=10100, step=100, seed=None):
         super().__init__(seed)
+        self.start = start
+        self.stop = stop
+        self.step = step
 
     def _benchmark(self, graph_factory: DataFactory, graph_name: str) -> None:
         logger = get_logger(SCALABILITY_DIR, self._logfile(graph_name, "log"))
-        rng = np.arange(1, 11)
-        users = np.concatenate([rng * (10 ** p) for p in range(2, 4)])
+        users = np.arange(self.start, self.stop, self.step)
         for u in tqdm.tqdm(users):
-            if u in (100, 1000, 10000):
-                graph_path = os.path.join(
-                    SCALABILITY_DIR, self._logfile(graph_name, "graphml", u))
-            else:
-                graph_path = None
-            dataset = create_synthetic_data(
-                users=u,
-                graph_factory=graph_factory,
-                graph_path=graph_path,
-                days=15,
-                p=0.2,
-                seed=self.seed)
-            risk_prop = GraphMetricsRiskPropagation(
-                dataset.graph,
-                tol=0.6,
-                workers=(w := self._workers(u)),
-                timeout=0 if w == 1 else 3,
-                early_stop=u * 10,
-                logger=logger,
-                max_dur=3600,
-                seed=self.seed)
-            risk_prop.run(dataset.scores, dataset.contacts)
+            for i in range(10):
+                if u in (100, 1000, 10000) and i == 0:
+                    logfile = self._logfile(graph_name, "graphml", u)
+                    graph_path = os.path.join(SCALABILITY_DIR, logfile)
+                else:
+                    graph_path = None
+                dataset = create_synthetic_data(
+                    users=u,
+                    graph_factory=graph_factory,
+                    graph_path=graph_path,
+                    days=15,
+                    p=0.2,
+                    seed=self.seed)
+                params = {
+                    "tol": 0.6,
+                    "transmission": 0.8,
+                    "workers": (w := self._workers(u)),
+                    "timeout": 0 if w == 1 else 3,
+                    "early_stop": u * 10,
+                    "logger": logger,
+                    "max_dur": 3600,
+                    "seed": self.seed}
+                if i == 0:
+                    risk_prop = GraphMetricsRiskPropagation(
+                        dataset.graph, **params)
+                else:
+                    risk_prop = propagation.RiskPropagation(**params)
+                risk_prop.run(dataset.scores, dataset.contacts)
 
     @staticmethod
     def _workers(users: int) -> int:
@@ -225,9 +233,9 @@ class ScalabilityExperiments(SyntheticExperiments):
     @staticmethod
     def _logfile(graph: str, ext: str, users: Optional[int] = None) -> str:
         if users is None:
-            name = f"{graph}-{round(time.time())}.{ext}"
+            name = f"{graph}-{time.time()}.{ext}"
         else:
-            name = f"{graph}-{users}-{round(time.time())}.{ext}"
+            name = f"{graph}-{users}-{time.time()}.{ext}"
         return name
 
 
@@ -253,6 +261,7 @@ class ParameterExperiments(SyntheticExperiments):
                 dataset.graph,
                 tol=tol / 10,
                 transmission=transmission / 10,
+                time_buffer=172_800,
                 workers=2,
                 timeout=3,
                 early_stop=10 * users,
@@ -262,7 +271,7 @@ class ParameterExperiments(SyntheticExperiments):
 
     @staticmethod
     def _logfile(graph: str, ext: str) -> str:
-        return f"{graph}-{round(time.time())}.{ext}"
+        return f"{graph}-{time.time()}.{ext}"
 
 
 class RealWorldExperiments:
@@ -314,6 +323,8 @@ class RealWorldExperiments:
             risk_prop = GraphMetricsRiskPropagation(
                 dataset.graph,
                 tol=0.6,
+                transmission=0.8,
+                time_buffer=172_800,
                 workers=1,
                 timeout=0,
                 logger=logger,
@@ -322,7 +333,7 @@ class RealWorldExperiments:
 
     @staticmethod
     def _logfile(setting: str, ext: str) -> str:
-        return f"{setting}-{round(time.time())}.{ext}"
+        return f"{setting}-{time.time()}.{ext}"
 
 
 class GraphMetricsRiskPropagation(RiskPropagation):
@@ -383,7 +394,12 @@ class GraphMetricsRiskPropagation(RiskPropagation):
 
 
 def parse_scalability_exps(args: argparse.Namespace) -> None:
-    ScalabilityExperiments(args.seed).benchmark(args.graph)
+    exps = ScalabilityExperiments(
+        start=args.start,
+        stop=args.stop,
+        step=args.step,
+        seed=args.seed)
+    exps.benchmark(args.graph)
 
 
 def parse_parameter_exps(args: argparse.Namespace) -> None:
@@ -402,6 +418,9 @@ def main():
     scalability.add_argument(
         "--graph", choices=("lfr", "power", "geometric"), required=True)
     scalability.add_argument("--seed", type=int, default=None)
+    scalability.add_argument("--start", type=int, default=0)
+    scalability.add_argument("--stop", type=int, default=10100)
+    scalability.add_argument("--step", type=int, default=100)
     scalability.set_defaults(func=parse_scalability_exps)
 
     parameters = subparsers.add_parser("parameters")

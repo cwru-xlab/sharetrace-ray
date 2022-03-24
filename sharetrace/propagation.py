@@ -1,4 +1,5 @@
 import collections
+import functools
 import itertools
 import json
 import logging
@@ -550,21 +551,31 @@ class RiskPropagation(ActorSystem):
     def _metis_partition(self, adjlist: Sequence) -> Array:
         # Ref: http://glaros.dtc.umn.edu/gkhome/fetch/sw/metis/manual.pdf
         if (seed := self.seed) is None:
-            # metis does not allow None for the seed; 1e8 < 32-bits.
+            # METIS does not allow None for the seed.
             seed = np.random.default_rng().integers(1e8)
-        _, labels = pymetis.part_graph(
+        # All option values must be type int.
+        options = pymetis.Options(
+            ncuts=3,  # default: 1
+            niter=10,  # default: 10
+            ufactor=200,  # default: 30
+            minconn=True,  # default: False
+            contig=True,  # default: False
+            numbering=0,
+            seed=int(seed),
+            no2hop=False)
+        part_graph = functools.partial(lambda opts: pymetis.part_graph(
             nparts=self.workers,
             adjacency=adjlist,
             recursive=False,
-            options=pymetis.Options(
-                ncuts=1,  # default: 1
-                niter=10,  # default: 10
-                ufactor=50,  # default: 30
-                minconn=False,  # default: False
-                contig=True,  # default: False
-                numbering=0,
-                seed=seed,
-                no2hop=False))
+            options=opts))
+        try:
+            _, labels = part_graph(options)
+        except RuntimeError:
+            self.logger.warning(
+                "Graph may be non-contiguous. Attempting to create a "
+                "non-contiguous partitioning.")
+            options.contig = False
+            _, labels = part_graph(options)
         return np.array(labels)
 
     def _spectral_partition(self, adjlist: Sequence, n2i: Index) -> Array:
