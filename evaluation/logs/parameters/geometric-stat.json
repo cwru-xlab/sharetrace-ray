@@ -1,0 +1,632 @@
+[
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 29655,
+    "RuntimeInSeconds": 39.8702
+  },
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 38768,
+    "RuntimeInSeconds": 52.7654
+  },
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 43654,
+    "RuntimeInSeconds": 58.058
+  },
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.4,
+    "Updates": 22,
+    "Messages": 58311,
+    "RuntimeInSeconds": 84.9567
+  },
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.5,
+    "Updates": 328,
+    "Messages": 81155,
+    "RuntimeInSeconds": 115.8818
+  },
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.6,
+    "Updates": 807,
+    "Messages": 128301,
+    "RuntimeInSeconds": 186.6382
+  },
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.7,
+    "Updates": 1101,
+    "Messages": 325454,
+    "RuntimeInSeconds": 466.7842
+  },
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.8,
+    "Updates": 1267,
+    "Messages": 306412,
+    "RuntimeInSeconds": 388.4792
+  },
+  {
+    "SendTolerance": 0.1,
+    "Transmission": 0.9,
+    "Updates": 2203,
+    "Messages": 545426,
+    "RuntimeInSeconds": 949.6492
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 23981,
+    "RuntimeInSeconds": 28.9546
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 26004,
+    "RuntimeInSeconds": 34.6615
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 31661,
+    "RuntimeInSeconds": 42.6103
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.4,
+    "Updates": 22,
+    "Messages": 35576,
+    "RuntimeInSeconds": 52.4292
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.5,
+    "Updates": 328,
+    "Messages": 46629,
+    "RuntimeInSeconds": 68.8469
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.6,
+    "Updates": 807,
+    "Messages": 63920,
+    "RuntimeInSeconds": 92.753
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.7,
+    "Updates": 1101,
+    "Messages": 117218,
+    "RuntimeInSeconds": 169.4928
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.8,
+    "Updates": 1518,
+    "Messages": 261320,
+    "RuntimeInSeconds": 360.8318
+  },
+  {
+    "SendTolerance": 0.2,
+    "Transmission": 0.9,
+    "Updates": 2195,
+    "Messages": 562292,
+    "RuntimeInSeconds": 966.8018
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 22090,
+    "RuntimeInSeconds": 27.1415
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 21812,
+    "RuntimeInSeconds": 28.0105
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 22856,
+    "RuntimeInSeconds": 29.8897
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.4,
+    "Updates": 22,
+    "Messages": 27721,
+    "RuntimeInSeconds": 40.8994
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.5,
+    "Updates": 328,
+    "Messages": 30575,
+    "RuntimeInSeconds": 45.2054
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.6,
+    "Updates": 807,
+    "Messages": 40875,
+    "RuntimeInSeconds": 60.2734
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.7,
+    "Updates": 1101,
+    "Messages": 65399,
+    "RuntimeInSeconds": 94.7758
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.8,
+    "Updates": 1774,
+    "Messages": 183288,
+    "RuntimeInSeconds": 264.247
+  },
+  {
+    "SendTolerance": 0.3,
+    "Transmission": 0.9,
+    "Updates": 2160,
+    "Messages": 445513,
+    "RuntimeInSeconds": 517.9863
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 20624,
+    "RuntimeInSeconds": 25.4896
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 19490,
+    "RuntimeInSeconds": 23.816
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 19281,
+    "RuntimeInSeconds": 24.5107
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.4,
+    "Updates": 22,
+    "Messages": 20063,
+    "RuntimeInSeconds": 25.7328
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.5,
+    "Updates": 328,
+    "Messages": 24651,
+    "RuntimeInSeconds": 36.6316
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.6,
+    "Updates": 807,
+    "Messages": 28191,
+    "RuntimeInSeconds": 42.3062
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.7,
+    "Updates": 1101,
+    "Messages": 41413,
+    "RuntimeInSeconds": 58.987
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.8,
+    "Updates": 1774,
+    "Messages": 94918,
+    "RuntimeInSeconds": 135.611
+  },
+  {
+    "SendTolerance": 0.4,
+    "Transmission": 0.9,
+    "Updates": 2192,
+    "Messages": 290216,
+    "RuntimeInSeconds": 304.254
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 19071,
+    "RuntimeInSeconds": 23.3825
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 17750,
+    "RuntimeInSeconds": 21.8648
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 17460,
+    "RuntimeInSeconds": 22.4155
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.4,
+    "Updates": 22,
+    "Messages": 16768,
+    "RuntimeInSeconds": 22.4013
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.5,
+    "Updates": 328,
+    "Messages": 18185,
+    "RuntimeInSeconds": 27.3248
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.6,
+    "Updates": 807,
+    "Messages": 21846,
+    "RuntimeInSeconds": 33.0081
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.7,
+    "Updates": 1099,
+    "Messages": 27265,
+    "RuntimeInSeconds": 39.9474
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.8,
+    "Updates": 1773,
+    "Messages": 55607,
+    "RuntimeInSeconds": 81.4314
+  },
+  {
+    "SendTolerance": 0.5,
+    "Transmission": 0.9,
+    "Updates": 2190,
+    "Messages": 205356,
+    "RuntimeInSeconds": 184.5004
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 16853,
+    "RuntimeInSeconds": 20.3894
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 15775,
+    "RuntimeInSeconds": 19.5416
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 15121,
+    "RuntimeInSeconds": 18.5425
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.4,
+    "Updates": 22,
+    "Messages": 14888,
+    "RuntimeInSeconds": 19.2375
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.5,
+    "Updates": 328,
+    "Messages": 14347,
+    "RuntimeInSeconds": 18.6581
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.6,
+    "Updates": 806,
+    "Messages": 16315,
+    "RuntimeInSeconds": 25.0248
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.7,
+    "Updates": 1092,
+    "Messages": 20501,
+    "RuntimeInSeconds": 31.4961
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.8,
+    "Updates": 1725,
+    "Messages": 34378,
+    "RuntimeInSeconds": 51.2349
+  },
+  {
+    "SendTolerance": 0.6,
+    "Transmission": 0.9,
+    "Updates": 2778,
+    "Messages": 283793,
+    "RuntimeInSeconds": 390.0053
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 14523,
+    "RuntimeInSeconds": 17.5391
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 13689,
+    "RuntimeInSeconds": 17.1436
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 12981,
+    "RuntimeInSeconds": 15.2797
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.4,
+    "Updates": 22,
+    "Messages": 12863,
+    "RuntimeInSeconds": 16.3184
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.5,
+    "Updates": 328,
+    "Messages": 12533,
+    "RuntimeInSeconds": 16.411
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.6,
+    "Updates": 801,
+    "Messages": 12434,
+    "RuntimeInSeconds": 19.5039
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.7,
+    "Updates": 1011,
+    "Messages": 14550,
+    "RuntimeInSeconds": 22.3686
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.8,
+    "Updates": 1403,
+    "Messages": 21187,
+    "RuntimeInSeconds": 31.8262
+  },
+  {
+    "SendTolerance": 0.7,
+    "Transmission": 0.9,
+    "Updates": 2443,
+    "Messages": 121513,
+    "RuntimeInSeconds": 174.0385
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 12074,
+    "RuntimeInSeconds": 15.1253
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 11483,
+    "RuntimeInSeconds": 14.158
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 10946,
+    "RuntimeInSeconds": 13.1302
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.4,
+    "Updates": 22,
+    "Messages": 10677,
+    "RuntimeInSeconds": 13.2719
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.5,
+    "Updates": 325,
+    "Messages": 10620,
+    "RuntimeInSeconds": 13.6492
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.6,
+    "Updates": 747,
+    "Messages": 10270,
+    "RuntimeInSeconds": 16.2069
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.7,
+    "Updates": 773,
+    "Messages": 10634,
+    "RuntimeInSeconds": 17.0665
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.8,
+    "Updates": 1050,
+    "Messages": 14178,
+    "RuntimeInSeconds": 21.7481
+  },
+  {
+    "SendTolerance": 0.8,
+    "Transmission": 0.9,
+    "Updates": 2087,
+    "Messages": 52434,
+    "RuntimeInSeconds": 75.2889
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 9600,
+    "RuntimeInSeconds": 11.9236
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 9265,
+    "RuntimeInSeconds": 10.9389
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 8927,
+    "RuntimeInSeconds": 10.2061
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.4,
+    "Updates": 20,
+    "Messages": 8650,
+    "RuntimeInSeconds": 13.3042
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.5,
+    "Updates": 297,
+    "Messages": 8733,
+    "RuntimeInSeconds": 10.5354
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.6,
+    "Updates": 528,
+    "Messages": 8466,
+    "RuntimeInSeconds": 10.6242
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.7,
+    "Updates": 548,
+    "Messages": 8667,
+    "RuntimeInSeconds": 13.8827
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.8,
+    "Updates": 733,
+    "Messages": 9380,
+    "RuntimeInSeconds": 15.3543
+  },
+  {
+    "SendTolerance": 0.9,
+    "Transmission": 0.9,
+    "Updates": 1584,
+    "Messages": 22426,
+    "RuntimeInSeconds": 33.1586
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.1,
+    "Updates": 0,
+    "Messages": 7019,
+    "RuntimeInSeconds": 7.9032
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.2,
+    "Updates": 0,
+    "Messages": 6910,
+    "RuntimeInSeconds": 7.814
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.3,
+    "Updates": 0,
+    "Messages": 6785,
+    "RuntimeInSeconds": 8.4253
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.4,
+    "Updates": 13,
+    "Messages": 6680,
+    "RuntimeInSeconds": 8.0175
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.5,
+    "Updates": 180,
+    "Messages": 6679,
+    "RuntimeInSeconds": 8.1037
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.6,
+    "Updates": 220,
+    "Messages": 6584,
+    "RuntimeInSeconds": 8.2922
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.7,
+    "Updates": 253,
+    "Messages": 6578,
+    "RuntimeInSeconds": 10.8147
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.8,
+    "Updates": 384,
+    "Messages": 6851,
+    "RuntimeInSeconds": 11.4337
+  },
+  {
+    "SendTolerance": 1.0,
+    "Transmission": 0.9,
+    "Updates": 790,
+    "Messages": 9012,
+    "RuntimeInSeconds": 14.4985
+  }
+]
