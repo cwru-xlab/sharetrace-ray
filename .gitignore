@@ -135,6 +135,7 @@ dmypy.json
 
 # numpy data
 *.npy
+*.npz
 
 # graph files
 *.graphml
