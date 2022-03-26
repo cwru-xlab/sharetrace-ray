@@ -3,12 +3,11 @@ from __future__ import annotations
 import collections
 import functools
 import heapq
-from typing import (
-    Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union)
-
 import igraph as ig
 import joblib
 import numpy as np
+from typing import (
+    Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union)
 
 from sharetrace import propagation
 
@@ -129,8 +128,8 @@ class MessageReachability:
         initialize, dijkstra = self._initialize, self._dijkstra
         results = {}
         for s in sources:
-            nodes, heap, reached = initialize(s, scores)
-            dijkstra(nodes, heap, reached, adjlist, contacts)
+            nodes = initialize(s, scores)
+            reached = dijkstra(nodes, adjlist, contacts)
             results[s] = {n.name: n.dist for n in reached}
         return results
 
@@ -150,11 +149,7 @@ class MessageReachability:
             unique[n] = np.unique(ne)
         return unique
 
-    def _initialize(
-            self,
-            source: int,
-            scores: NpSeq
-    ) -> Tuple[List[Node], List[Node], Set[Node]]:
+    def _initialize(self, source: int, scores: NpSeq) -> List[Node]:
         initial = propagation.initial
         inits = (scores := np.array([initial(s) for s in scores])).copy()
         inits["val"] *= self.transmission
@@ -162,22 +157,20 @@ class MessageReachability:
         nodes.extend(Node(n, inits[n]) for n in range(source))
         nodes.append(Node(source, inits[source], dist=0, msg=scores[source]))
         nodes.extend(Node(n, inits[n]) for n in range(source + 1, len(scores)))
-        heapq.heapify(heap := nodes.copy())
-        reached = set()
-        return nodes, heap, reached
+        return nodes
 
     def _dijkstra(
             self,
             nodes: List[Node],
-            heap: List[Node],
-            reached: Set[Node],
             adjlist: AdjList,
             contacts: ContactMap
-    ) -> None:
+    ) -> Set[Node]:
         pop = heapq.heappop
         transmission, tol, buffer = self.transmission, self.tol, self.buffer
         ckey = propagation.ckey
+        reached = set()
         add, get_ne = reached.add, adjlist.get
+        heapq.heapify(heap := nodes.copy())
         while heap:
             node = pop(heap)
             if (msg := node.msg) is not None:
@@ -193,6 +186,7 @@ class MessageReachability:
                         if high_enough and old_enough and closer:
                             ne.dist, ne.msg = new, send
                             add(ne)
+        return reached
 
     def copy(self) -> MessageReachability:
         return self.__copy__()
