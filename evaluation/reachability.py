@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import collections
+import dataclasses
 import functools
 import heapq
+from typing import (
+    Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union)
+
 import igraph as ig
 import joblib
 import numpy as np
-from typing import (
-    Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union)
 
 from sharetrace import propagation
 
@@ -24,6 +26,8 @@ def ratio(reached: Reached, graph: ig.Graph) -> Tuple[float, int, int]:
     return actual / ideal, actual, ideal
 
 
+# noinspection PyUnresolvedReferences
+@dataclasses.dataclass(slots=True)
 class Node:
     """A node used by MessageReachability.
 
@@ -33,47 +37,30 @@ class Node:
         msg: The risk score message to send to its neighbors.
         dist: The shortest-path distance from the source node.
     """
-    __slots__ = ("name", "init", "msg", "dist")
+    name: int
+    init: np.void
+    msg: Optional[np.void] = None
+    dist: float = np.inf
 
-    def __init__(
-            self,
-            name: int,
-            init: np.void,
-            msg: Optional[np.void] = None,
-            dist: float = np.inf):
-        self.name = name
-        self.init = init
-        self.msg = msg
-        self.dist = dist
-
-    def __eq__(self, other) -> bool:
-        self._check_comparable(other)
+    def __eq__(self, other: Node) -> bool:
         return self.dist == other.dist
 
-    def __le__(self, other) -> bool:
-        self._check_comparable(other)
+    def __le__(self, other: Node) -> bool:
         return self.dist <= other.dist
 
-    def __lt__(self, other) -> bool:
-        self._check_comparable(other)
+    def __lt__(self, other: Node) -> bool:
         return self.dist < other.dist
 
-    def __ge__(self, other) -> bool:
-        self._check_comparable(other)
+    def __ge__(self, other: Node) -> bool:
         return self.dist >= other.dist
 
-    def __gt__(self, other) -> bool:
-        self._check_comparable(other)
+    def __gt__(self, other: Node) -> bool:
         return self.dist > other.dist
-
-    def _check_comparable(self, other):
-        if not hasattr(other, "dist"):
-            raise NotImplementedError
 
     def __hash__(self) -> int:
         return hash(self.name)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         cls = self.__class__.__name__
         name, dist, init, msg = self.name, self.dist, self.init, self.msg
         return f"{cls}(name={name}, dist={dist}, init={init}, msg={msg})"

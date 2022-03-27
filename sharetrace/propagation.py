@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import functools
 import itertools
 import json
@@ -6,7 +7,6 @@ import logging
 import time
 import timeit
 import warnings
-from dataclasses import dataclass
 from enum import Enum
 from typing import (
     Any, Collection, Hashable, Iterable, List, Mapping, MutableMapping,
@@ -26,11 +26,11 @@ Array = np.ndarray
 NpSeq = Sequence[np.ndarray]
 NpMap = Mapping[int, np.ndarray]
 Graph = MutableMapping[Hashable, Any]
-Nodes = Mapping[int, np.void]
 Index = Union[Mapping[int, int], Sequence[int], np.ndarray]
 Log = MutableMapping[str, Any]
 
 ACTOR_SYSTEM = -1
+SEC_PER_DAY = 86400
 
 
 def ckey(n1: int, n2: int) -> Tuple[int, int]:
@@ -54,7 +54,7 @@ class StopCondition(Enum):
         return self, x
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(slots=True, frozen=True)
 class WorkerLog:
     name: Hashable
     runtime: float
@@ -113,12 +113,22 @@ class WorkerLog:
             "StdUpdates": approx(self.std_updates)}
 
 
+@dataclasses.dataclass(slots=True, frozen=True)
 class Result:
-    __slots__ = ("data", "log")
+    data: Any
+    log: WorkerLog
 
-    def __init__(self, data, log: WorkerLog):
-        self.data = data
-        self.log = log
+
+@dataclasses.dataclass(slots=True)
+class Node:
+    init_val: float
+    init_msg: np.void
+    curr_val: Optional[float] = None
+    updates: int = 0
+
+    def __post_init__(self):
+        if self.curr_val is None:
+            self.curr_val = self.init_val
 
 
 class Partition(Actor):
@@ -188,7 +198,7 @@ class _Partition(Actor):
         self.max_dur = max_dur
         self.early_stop = early_stop
         self._local = collections.deque()
-        self._nodes: Nodes = {}
+        self._nodes: Mapping[int, Node] = {}
         self._start = -1
         self._since_update = 0
         self._init_done = False
@@ -199,7 +209,7 @@ class _Partition(Actor):
     def run(self) -> Result:
         runtime = util.time(self._run).seconds
         result = Result(
-            data={n: props["curr"] for n, props in self._nodes.items()},
+            data={n: node.curr_val for n, node in self._nodes.items()},
             log=self._log(runtime))
         # Allow the last partition output its log.
         time.sleep(0.1)
@@ -251,10 +261,10 @@ class _Partition(Actor):
 
     def _update(self, var: int, score: np.void) -> None:
         """Update the exposure score of the current variable node."""
-        if (new := score["val"]) > (props := self._nodes[var])["curr"]:
+        if (new := score["val"]) > (node := self._nodes[var]).curr_val:
             self._since_update = 0
-            props["curr"] = new
-            props["updates"] += 1
+            node.curr_val = new
+            node.updates += 1
         elif self.early_stop is not None and self._init_done:
             self._since_update += 1
 
@@ -265,11 +275,7 @@ class _Partition(Actor):
         for var, vscores in scores.items():
             init_msg = (init := initial(vscores)).copy()
             init_msg["val"] *= transmission
-            nodes[var] = {
-                "init_val": init["val"],
-                "init_msg": init_msg,
-                "curr": init["val"],
-                "updates": 0}
+            nodes[var] = Node(init_val=init["val"], init_msg=init_msg)
         self._nodes = nodes
         graph, send = self.graph, self._send
         # Send initial symptom score messages to all neighbors.
@@ -280,10 +286,9 @@ class _Partition(Actor):
     def _send(self, scores: Array, var: int, factors: Array) -> None:
         """Compute a factor node message and send if it will be effective."""
         graph, init, sgroup, send, buffer, tol, eps, const, transmission = (
-            self.graph, self._nodes[var]["init_msg"], self.name, self.send,
+            self.graph, self._nodes[var].init_msg, self.name, self.send,
             self.time_buffer, self.tol, self.eps, self.time_const,
             self.transmission)
-        inf, sec_per_day = np.inf, 86400
         message, log, argmax, minimum, maximum = (
             model.message, np.log, np.argmax, np.minimum, np.maximum)
         for f in factors:
@@ -291,7 +296,7 @@ class _Partition(Actor):
             ctime = graph[ckey(var, f)]
             if len(scores := scores[scores["time"] <= ctime + buffer]) > 0:
                 # Scales time deltas in partial days.
-                diff = minimum((scores["time"] - ctime) / sec_per_day, 0)
+                diff = minimum((scores["time"] - ctime) / SEC_PER_DAY, 0)
                 # Use the log transform to avoid overflow issues.
                 weighted = log(maximum(scores["val"], eps)) + (diff / const)
                 score = scores[argmax(weighted)]
@@ -333,8 +338,8 @@ class _Partition(Actor):
         nodes, (condition, data) = self._nodes, self._stop_condition
         props = nodes.values()
         update = np.array([
-            u for node in props if (u := node["curr"] - node["init_val"]) > 0])
-        updates = np.array([u for node in props if (u := node["updates"]) > 0])
+            u for node in props if (u := node.curr_val - node.init_val) > 0])
+        updates = np.array([u for node in props if (u := node.updates) > 0])
         return WorkerLog(
             name=self.name,
             runtime=runtime,
@@ -382,7 +387,7 @@ class RiskPropagation(ActorSystem):
             eps: float = 1e-7,
             workers: int = 1,
             partitioning: str = "metis",
-            max_size: Optional[int] = 10_000_000,
+            max_size: Optional[int] = 100_000,
             timeout: Optional[float] = None,
             max_dur: Optional[float] = None,
             early_stop: Optional[int] = None,
