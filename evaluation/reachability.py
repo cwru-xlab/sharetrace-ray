@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import collections
 import dataclasses
-import functools
 import heapq
 from typing import (
     Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union)
@@ -86,12 +85,9 @@ class MessageReachability:
     def run_all(self, scores: NpSeq, contacts: np.ndarray) -> Reached:
         """Computes message reachability for all users."""
         par = joblib.Parallel(self.workers, batch_size=1, verbose=self.verbose)
-        contacts = self._to_map(contacts)
-        adjlist = self._adjlist(contacts)
-        run = functools.partial(
-            lambda s: self.run(
-                s, scores, contacts, adjlist, precomputed=True))
-        run = joblib.delayed(run)
+        contacts, adjlist = self.precompute(contacts)
+        run = joblib.delayed(
+            lambda s: self.run(s, scores, contacts, adjlist, precomputed=True))
         sources = np.arange(users := len(scores))
         ranges = np.array_split(sources, np.ceil(users / 100))
         results = par(run(rng) for rng in ranges)
@@ -110,8 +106,7 @@ class MessageReachability:
     ) -> Reached:
         """Computes message reachability for the given sources."""
         if not precomputed:
-            contacts = self._to_map(contacts)
-            adjlist = self._adjlist(contacts)
+            contacts, adjlist = self.precompute(contacts)
         initialize, dijkstra = self._initialize, self._dijkstra
         results = {}
         for s in sources:
@@ -119,6 +114,11 @@ class MessageReachability:
             reached = dijkstra(nodes, adjlist, contacts)
             results[s] = {n.name: n.dist for n in reached}
         return results
+
+    def precompute(self, contacts: np.ndarray) -> Tuple[ContactMap, AdjList]:
+        contacts = self._to_map(contacts)
+        adjlist = self._adjlist(contacts)
+        return contacts, adjlist
 
     @staticmethod
     def _to_map(contacts: np.ndarray) -> ContactMap:
