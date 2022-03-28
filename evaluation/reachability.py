@@ -89,7 +89,7 @@ class MessageReachability:
         contacts = self._to_map(contacts)
         adjlist = self._adjlist(contacts)
         run = functools.partial(
-            lambda s: self.copy().run(
+            lambda s: self.run(
                 s, scores, contacts, adjlist, precomputed=True))
         run = joblib.delayed(run)
         sources = np.arange(users := len(scores))
@@ -174,14 +174,3 @@ class MessageReachability:
                             ne.dist, ne.msg = new, send
                             add(ne)
         return reached
-
-    def copy(self) -> MessageReachability:
-        return self.__copy__()
-
-    def __copy__(self) -> MessageReachability:
-        return MessageReachability(
-            transmission=self.transmission,
-            tol=self.tol,
-            buffer=self.buffer,
-            workers=self.workers,
-            verbose=self.verbose)
