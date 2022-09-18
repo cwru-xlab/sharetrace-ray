@@ -19,7 +19,7 @@ import ray
 from scipy import sparse
 from sklearn import cluster
 
-from sharetrace import model, queue, util
+from sharetrace import model, queues, util
 from sharetrace.actors import Actor, ActorSystem
 
 Array = np.ndarray
@@ -134,7 +134,7 @@ class Node:
 class Partition(Actor):
     __slots__ = ("_actor",)
 
-    def __init__(self, name: int, mailbox: queue.Queue, **kwargs):
+    def __init__(self, name: int, mailbox: queues.Queue, **kwargs):
         super().__init__(name, mailbox)
         self._actor = _Partition.remote(name, mailbox=mailbox, **kwargs)
 
@@ -173,7 +173,7 @@ class _Partition(Actor):
     def __init__(
             self,
             name: int,
-            mailbox: queue.Queue,
+            mailbox: queues.Queue,
             graph: Graph,
             time_buffer: int,
             time_const: float,
@@ -610,15 +610,15 @@ class RiskPropagation(ActorSystem):
         # Ray Queue must be created and then passed as an object reference.
         return Partition(
             name=name,
-            mailbox=queue.Queue(0 if self.max_size is None else self.max_size),
+            mailbox=queues.Queue(0 if self.max_size is None else self.max_size),
             graph=graph,
             time_buffer=self.time_buffer,
             time_const=self.time_const,
             transmission=self.transmission,
             tol=self.tol,
             eps=self.eps,
-            empty=queue.Empty,
-            full=queue.Full,
+            empty=queues.Empty,
+            full=queues.Full,
             timeout=self.timeout,
             max_dur=self.max_dur,
             early_stop=self.early_stop)
