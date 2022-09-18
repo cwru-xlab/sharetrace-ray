@@ -81,11 +81,13 @@ class ContactSearch:
     def select(self, histories: Histories) -> Tuple:
         """Returns the unique user pairs and grouped Cartesian coordinates."""
         points, pidx = flatten([to_latlongs(h) for h in histories])
+        # Prefer sklearn BallTree over KDTree to use "haversine" metric.
         tree = neighbors.BallTree(points, self.leaf_size, metric="haversine")
         queried, qidx = flatten(
             tree.query_radius(points, self.r / _EARTH_RADIUS_METERS))
         # Sorting along the last axis ensures duplicate pairs are removed.
         pairs = np.sort(np.column_stack((qidx, queried)))
+        # Map back to distinct user-index pairs.
         pairs = np.unique(pidx[pairs], axis=0)
         # Only include pairs that correspond to two distinct users.
         pairs = pairs[~(pairs[:, 0] == pairs[:, 1])]
